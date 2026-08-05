@@ -1,0 +1,1 @@
+ALTER TABLE practice_sessions ADD COLUMN IF NOT EXISTS event_id INTEGER;
