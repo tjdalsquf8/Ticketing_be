@@ -1,12 +1,6 @@
-import { body, header } from "express-validator";
-
-const guestUuidValidator = header("x-guest-uuid")
-  .optional()
-  .isUUID(4)
-  .withMessage("X-Guest-UUID는 유효한 UUID v4 형식이어야 합니다.");
+import { body } from "express-validator";
 
 const startSessionValidator = [
-  guestUuidValidator,
   body("mode")
     .notEmpty().withMessage("mode는 필수입니다.")
     .isIn(["practice", "live"]).withMessage("mode는 practice 또는 live여야 합니다."),
@@ -20,7 +14,6 @@ const startSessionValidator = [
 ];
 
 const completeSessionValidator = [
-  guestUuidValidator,
   body("clientElapsedMs")
     .notEmpty().withMessage("clientElapsedMs는 필수입니다.")
     .isInt({ min: 0 }).withMessage("clientElapsedMs는 0 이상의 정수여야 합니다."),

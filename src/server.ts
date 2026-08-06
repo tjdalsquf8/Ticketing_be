@@ -1,6 +1,7 @@
 import app from "./app";
 import config from "./config";
 import pool from "./config/db";
+import { startCleanupCron } from "./jobs/cleanupSessions";
 
 const PORT = config.port;
 
@@ -12,6 +13,8 @@ pool.query("SELECT NOW()", (err, res) => {
     console.log("DB 연결 성공", res.rows[0].now);
   }
 });
+
+startCleanupCron();
 
 app.listen(PORT, () => {
   console.log(`서버 실행중: http://localhost:${PORT}`);
