@@ -49,6 +49,7 @@ const getRankings = async (params: {
      WHERE completed_at IS NOT NULL
        AND mode = $1
        AND started_at >= NOW() - INTERVAL '${interval}'
+       AND ranking_eligible = true
        ${eventFilter}
      GROUP BY COALESCE(user_id::text, guest_uuid), nickname, user_id
      ORDER BY best_ms
@@ -71,6 +72,7 @@ const getRankings = async (params: {
      WHERE completed_at IS NOT NULL
        AND mode = $1
        AND started_at >= NOW() - INTERVAL '${interval}'
+       AND ranking_eligible = true
        ${countEventFilter}`,
     countParams,
   );
