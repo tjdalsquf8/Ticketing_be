@@ -3,7 +3,7 @@ import { AppError } from '../middlewares/errorHandler'
 
 const getMe = async (userId: number) => {
   const result = await pool.query(
-    'SELECT id, email, name, created_at FROM users WHERE id = $1',
+    'SELECT id, email, name, role, created_at FROM users WHERE id = $1',
     [userId]
   )
   const user = result.rows[0]

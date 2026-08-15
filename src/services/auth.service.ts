@@ -27,7 +27,7 @@ const register = async (email: string, password: string, name: string) => {
 const login = async (email: string, password: string) => {
   // 이메일 확인
   const result = await pool.query(
-    "SELECT id, email, name, password FROM users WHERE email = $1",
+    "SELECT id, email, name, password, role FROM users WHERE email = $1",
     [email],
   );
   const user = result.rows[0];
@@ -71,6 +71,7 @@ const login = async (email: string, password: string) => {
     id: user.id,
     email: user.email,
     name: user.name,
+    role: user.role as "user" | "admin",
   };
   return {
     accessToken,
