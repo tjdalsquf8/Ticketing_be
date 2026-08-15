@@ -5,3 +5,5 @@ dist/
 .DS_Store
 /*.md
 /*.MD
+!README.md
+!/.github/
