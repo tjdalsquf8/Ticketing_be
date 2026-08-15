@@ -2,6 +2,7 @@ import app from "./app";
 import config from "./config";
 import pool from "./config/db";
 import { startCleanupCron } from "./jobs/cleanupSessions";
+import { startLiveScheduler } from "./jobs/liveScheduler";
 
 const PORT = config.port;
 
@@ -15,6 +16,7 @@ pool.query("SELECT NOW()", (err, res) => {
 });
 
 startCleanupCron();
+startLiveScheduler();
 
 app.listen(PORT, () => {
   console.log(`서버 실행중: http://localhost:${PORT}`);

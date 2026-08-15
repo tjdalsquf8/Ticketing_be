@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "db:dump": "set -a && . ./.env && set +a && PGPASSWORD=\"$DB_PASSWORD\" pg_dump -h \"${DB_HOST:-localhost}\" -p \"${DB_PORT:-5432}\" -U \"${DB_USERNAME:-postgres}\" -d \"${DB_NAME:-ticketingweb}\" --schema-only --no-owner --no-privileges --no-comments > src/db/schema.sql && echo '[db:dump] src/db/schema.sql updated'"
   },
   "keywords": [],
   "author": "",

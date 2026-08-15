@@ -1,0 +1,194 @@
+import pool from "../config/db";
+
+const ROUND_DURATION_MINUTES = 5;
+
+// 방어적 런타임 단언: 이 상수가 실수로 문자열/외부값으로 바뀌어도 SQL 인젝션 경로가 열리지 않도록
+// 모듈 로드 시점에 정수 & 안전 범위(1~120)임을 강제한다.
+if (
+  !Number.isInteger(ROUND_DURATION_MINUTES) ||
+  ROUND_DURATION_MINUTES < 1 ||
+  ROUND_DURATION_MINUTES > 120
+) {
+  throw new Error(
+    `[live.service] ROUND_DURATION_MINUTES must be an integer in [1,120], got ${ROUND_DURATION_MINUTES}`,
+  );
+}
+
+type RoundSummary = {
+  roundId: number;
+  opensAt: string;
+  closesAt: string;
+  eventId: number;
+  status: "scheduled" | "open" | "closed" | "cancelled";
+  totalSeats: number;
+};
+
+const mapRound = (row: {
+  id: number;
+  opens_at: string;
+  closes_at: string;
+  event_id: number;
+  status: RoundSummary["status"];
+  seat_labels: string[];
+}): RoundSummary => ({
+  roundId: row.id,
+  opensAt: row.opens_at,
+  closesAt: row.closes_at,
+  eventId: row.event_id,
+  status: row.status,
+  totalSeats: Array.isArray(row.seat_labels) ? row.seat_labels.length : 0,
+});
+
+// ─── Scheduler operations (called from cron) ─────────────────
+
+// KST 오늘 자정 이내 정각 회차 미리 생성.
+// - fromMidnight=true : KST 오늘 00시 ~ 23시 (크론 매일 00시 호출용)
+// - fromMidnight=false: 다음 정각 ~ KST 오늘 23시 (서버 부팅 시 남은 오늘 슬롯만 채움)
+// - live_config 없으면 CROSS JOIN 결과 0행 → 아무것도 안 만듦 (부트스트랩 안전 가드)
+// - excluded_hours (KST 기준 0~23시)에 해당하는 정각은 생성 스킵
+// - 관리자가 config를 갱신하면 이후 정각부터 새 event/seat로 반영됨 (기존 회차는 스냅샷 유지)
+// - 기존 회차 존재 시 ON CONFLICT (opens_at) DO NOTHING
+const ensureUpcomingRounds = async (
+  fromMidnight: boolean = false,
+): Promise<void> => {
+  // startExpr 은 boolean 분기로 선택되는 2개의 리터럴 SQL 조각뿐이라 인젝션 경로 없음.
+  // ⚠️ 어떤 경우에도 외부 입력(req.body/query/env)을 이 변수로 전달하지 말 것.
+  const startExpr = fromMidnight
+    ? `date_trunc('day', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul'`
+    : `date_trunc('hour', NOW()) + INTERVAL '1 hour'`;
+  // ROUND_DURATION_MINUTES 는 파라미터 바인딩($1)으로 전달해 문자열 인터폴레이션을 제거.
+  // make_interval(mins => $1) 로 안전하게 INTERVAL 로 변환.
+  await pool.query(
+    `INSERT INTO live_rounds (opens_at, closes_at, event_id, seat_labels, status)
+     SELECT slot.ts,
+            slot.ts + make_interval(mins => $1::int),
+            cfg.default_event_id,
+            cfg.default_seat_labels,
+            'scheduled'
+     FROM generate_series(
+            ${startExpr},
+            (date_trunc('day', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul') + INTERVAL '23 hours',
+            INTERVAL '1 hour'
+          ) AS slot(ts)
+     CROSS JOIN (
+       SELECT default_event_id, default_seat_labels, excluded_hours FROM live_config WHERE id = 1
+     ) cfg
+     WHERE NOT (
+       EXTRACT(HOUR FROM slot.ts AT TIME ZONE 'Asia/Seoul')::int = ANY(cfg.excluded_hours)
+     )
+     ON CONFLICT (opens_at) DO NOTHING`,
+    [ROUND_DURATION_MINUTES],
+  );
+};
+
+// 회차 상태 전이:
+// - scheduled → open + live_seats 벌크 INSERT (한 CTE로 원자 처리)
+// - open → closed (Phase 7에서 티켓 배치 훅이 여기 추가됨)
+const transitionRounds = async (): Promise<void> => {
+  await pool.query(
+    `WITH promoted AS (
+       UPDATE live_rounds SET status = 'open'
+       WHERE status = 'scheduled' AND opens_at <= NOW()
+       RETURNING id, seat_labels
+     )
+     INSERT INTO live_seats (round_id, seat_label)
+     SELECT p.id, label
+     FROM promoted p
+     CROSS JOIN LATERAL jsonb_array_elements_text(p.seat_labels) AS label
+     ON CONFLICT (round_id, seat_label) DO NOTHING`,
+  );
+
+  await pool.query(
+    `UPDATE live_rounds SET status = 'closed'
+     WHERE status = 'open' AND closes_at <= NOW()`,
+  );
+};
+
+// ─── Public queries (홈/랜딩용) ─────────────────────────────
+
+// GET /api/live/current — 지금 진행중 회차 (없으면 null)
+const getCurrent = async (): Promise<RoundSummary | null> => {
+  const result = await pool.query(
+    `SELECT id, opens_at, closes_at, event_id, status, seat_labels
+     FROM live_rounds
+     WHERE status = 'open'
+     ORDER BY opens_at DESC
+     LIMIT 1`,
+  );
+  return result.rows[0] ? mapRound(result.rows[0]) : null;
+};
+
+// GET /api/live/next — 다음 예정 회차 (없으면 null)
+const getNext = async (): Promise<RoundSummary | null> => {
+  const result = await pool.query(
+    `SELECT id, opens_at, closes_at, event_id, status, seat_labels
+     FROM live_rounds
+     WHERE status = 'scheduled' AND opens_at > NOW()
+     ORDER BY opens_at ASC
+     LIMIT 1`,
+  );
+  return result.rows[0] ? mapRound(result.rows[0]) : null;
+};
+
+// GET /api/live/recent-results?limit=N — 최근 종료 회차 요약 (각 회차별 top3)
+type RecentResult = RoundSummary & {
+  top3: Array<{
+    rank: number;
+    nickname: string;
+    seatLabel: string | null;
+    elapsedMs: number;
+    isMember: boolean;
+  }>;
+};
+
+const getRecentResults = async (limit: number): Promise<RecentResult[]> => {
+  const roundsRes = await pool.query(
+    `SELECT id, opens_at, closes_at, event_id, status, seat_labels
+     FROM live_rounds
+     WHERE status = 'closed'
+     ORDER BY closes_at DESC
+     LIMIT $1`,
+    [limit],
+  );
+  if (roundsRes.rows.length === 0) return [];
+
+  const roundIds = roundsRes.rows.map((r) => r.id);
+  const topsRes = await pool.query(
+    `SELECT round_id, nickname, seat_label, elapsed_ms, user_id, rank
+     FROM (
+       SELECT round_id, nickname, seat_label, elapsed_ms, user_id,
+              ROW_NUMBER() OVER (PARTITION BY round_id ORDER BY elapsed_ms ASC) AS rank
+       FROM live_sessions
+       WHERE round_id = ANY($1::int[]) AND status = 'completed'
+     ) ranked
+     WHERE rank <= 3`,
+    [roundIds],
+  );
+
+  const topsByRound = new Map<number, RecentResult["top3"]>();
+  for (const row of topsRes.rows) {
+    const list = topsByRound.get(row.round_id) ?? [];
+    list.push({
+      rank: Number(row.rank),
+      nickname: row.nickname,
+      seatLabel: row.seat_label,
+      elapsedMs: row.elapsed_ms,
+      isMember: row.user_id !== null,
+    });
+    topsByRound.set(row.round_id, list);
+  }
+
+  return roundsRes.rows.map((r) => ({
+    ...mapRound(r),
+    top3: topsByRound.get(r.id) ?? [],
+  }));
+};
+
+export {
+  ROUND_DURATION_MINUTES,
+  ensureUpcomingRounds,
+  transitionRounds,
+  getCurrent,
+  getNext,
+  getRecentResults,
+};
