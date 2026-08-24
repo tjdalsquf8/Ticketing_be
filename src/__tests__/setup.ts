@@ -39,6 +39,17 @@ export const cleanupTestPracticeSessions = async () => {
 };
 
 /**
+ * 테스트가 남긴 guests 테이블 데이터 정리
+ * - nickname 접두어로 식별
+ */
+export const cleanupTestGuests = async () => {
+  await pool.query(
+    `DELETE FROM guests WHERE nickname LIKE $1`,
+    [`${TEST_NICKNAME_PREFIX}%`],
+  );
+};
+
+/**
  * 테스트가 남긴 users 데이터 정리 (이메일 접두어 기준)
  * - 관련된 practice_sessions도 함께 정리 (FK 참조 방지)
  */

@@ -112,7 +112,7 @@ describe("Practice API", () => {
       const completeRes = await agentImpostor
         .post(`/api/practice/sessions/${sessionId}/complete`)
         .set("Content-Type", "application/json")
-        .send({ clientElapsedMs: 5000 });
+        .send({});
 
       expect(completeRes.status).toBe(200);
       expect(completeRes.body.data.ranked).toBe(false);
@@ -136,7 +136,7 @@ describe("Practice API", () => {
       const completeRes = await agent
         .post(`/api/practice/sessions/${sessionId}/complete`)
         .set("Content-Type", "application/json")
-        .send({ clientElapsedMs: 5000 });
+        .send({});
 
       expect(completeRes.status).toBe(200);
       expect(completeRes.body.data.ranked).toBe(true);
@@ -158,7 +158,7 @@ describe("Practice API", () => {
       const res = await agent
         .post("/api/practice/sessions/prc_ffffffffffffffff/complete")
         .set("Content-Type", "application/json")
-        .send({ clientElapsedMs: 5000 });
+        .send({});
 
       expect(res.status).toBe(404);
       expect(res.body.success).toBe(false);
@@ -186,7 +186,7 @@ describe("Practice API", () => {
       const res = await agentB
         .post(`/api/practice/sessions/${aSessionId}/complete`)
         .set("Content-Type", "application/json")
-        .send({ clientElapsedMs: 5000 });
+        .send({});
 
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe("SESSION_FORBIDDEN");
@@ -204,13 +204,13 @@ describe("Practice API", () => {
       await agent
         .post(`/api/practice/sessions/${sessionId}/complete`)
         .set("Content-Type", "application/json")
-        .send({ clientElapsedMs: 5000 });
+        .send({});
 
       // 재완료 시도
       const res = await agent
         .post(`/api/practice/sessions/${sessionId}/complete`)
         .set("Content-Type", "application/json")
-        .send({ clientElapsedMs: 5000 });
+        .send({});
 
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe("SESSION_ALREADY_COMPLETED");
@@ -221,7 +221,7 @@ describe("Practice API", () => {
       const res = await request(app)
         .post("/api/practice/sessions/prc_ffffffffffffffff/complete")
         .set("Content-Type", "application/json")
-        .send({ clientElapsedMs: 5000 });
+        .send({});
 
       expect(res.status).toBe(401);
       expect(res.body.error.code).toBe("GUEST_UUID_MISSING");
