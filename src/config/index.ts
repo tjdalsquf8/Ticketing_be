@@ -25,6 +25,21 @@ const corsOrigins = (rawCorsOrigins || "http://localhost:3000")
   .map((s) => s.trim())
   .filter(Boolean);
 
+const activeCapacity = parseInt(process.env.LIVE_ACTIVE_CAPACITY || "20", 10);
+if (!Number.isInteger(activeCapacity) || activeCapacity < 1 || activeCapacity > 1000) {
+  throw new Error("LIVE_ACTIVE_CAPACITY는 1~1000 범위의 정수여야 합니다.");
+}
+
+const holdTtlSeconds = parseInt(process.env.LIVE_HOLD_TTL_SECONDS || "30", 10);
+if (!Number.isInteger(holdTtlSeconds) || holdTtlSeconds < 10 || holdTtlSeconds > 300) {
+  throw new Error("LIVE_HOLD_TTL_SECONDS는 10~300 범위의 정수여야 합니다.");
+}
+
+const ticketRankCutoff = parseInt(process.env.LIVE_TICKET_RANK_CUTOFF || "10", 10);
+if (!Number.isInteger(ticketRankCutoff) || ticketRankCutoff < 1 || ticketRankCutoff > 100) {
+  throw new Error("LIVE_TICKET_RANK_CUTOFF는 1~100 범위의 정수여야 합니다.");
+}
+
 const config = {
   port: process.env.PORT || 3001,
   nodeEnv,
@@ -38,6 +53,11 @@ const config = {
   },
   jwt: {
     secret: jwtSecret,
+  },
+  live: {
+    activeCapacity,
+    holdTtlSeconds,
+    ticketRankCutoff,
   },
 };
 

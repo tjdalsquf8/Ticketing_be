@@ -13,10 +13,6 @@ const startSessionValidator = [
   body("eventId").optional().isInt({ min: 1 }).withMessage("eventId는 1 이상의 정수여야 합니다."),
 ];
 
-const completeSessionValidator = [
-  body("clientElapsedMs")
-    .notEmpty().withMessage("clientElapsedMs는 필수입니다.")
-    .isInt({ min: 0 }).withMessage("clientElapsedMs는 0 이상의 정수여야 합니다."),
-];
+const completeSessionValidator: ReturnType<typeof body>[] = [];
 
 export { startSessionValidator, completeSessionValidator };

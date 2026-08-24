@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict jW0itaSH1Q8EbhcaHBlHVhF5TmFtPghfw3V7mscJhZOZoJfDRaZSwVzEWcXTxa4
+\restrict AIOcECKxq9Z5T69S2R6fkc45oxPoSOJV2krX29XhogSzK6ac6zc7MzjkbXoutH6
 
 -- Dumped from database version 16.13 (Postgres.app)
 -- Dumped by pg_dump version 18.4
@@ -22,6 +22,39 @@ SET row_security = off;
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: guests; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.guests (
+    id integer NOT NULL,
+    guest_uuid character varying(36) NOT NULL,
+    nickname character varying(30) DEFAULT '익명유저'::character varying NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: guests_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.guests_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: guests_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.guests_id_seq OWNED BY public.guests.id;
+
 
 --
 -- Name: live_config; Type: TABLE; Schema: public; Owner: -
@@ -159,8 +192,9 @@ CREATE TABLE public.live_sessions (
     completed_at timestamp with time zone,
     elapsed_ms integer,
     status character varying(16) DEFAULT 'active'::character varying NOT NULL,
+    queue_position integer,
     CONSTRAINT live_sessions_check CHECK (((user_id IS NOT NULL) OR (guest_uuid IS NOT NULL))),
-    CONSTRAINT live_sessions_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'completed'::character varying, 'failed'::character varying])::text[])))
+    CONSTRAINT live_sessions_status_check CHECK (((status)::text = ANY (ARRAY['queued'::text, 'active'::text, 'completed'::text, 'failed'::text])))
 );
 
 
@@ -273,7 +307,6 @@ CREATE TABLE public.tickets (
     elapsed_ms integer NOT NULL,
     rank smallint NOT NULL,
     total_participants integer NOT NULL,
-    qr_payload character varying(200) NOT NULL,
     issued_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -335,6 +368,13 @@ ALTER SEQUENCE public.users_id_seq OWNED BY public.users.id;
 
 
 --
+-- Name: guests id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.guests ALTER COLUMN id SET DEFAULT nextval('public.guests_id_seq'::regclass);
+
+
+--
 -- Name: live_holds id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -388,6 +428,22 @@ ALTER TABLE ONLY public.tickets ALTER COLUMN id SET DEFAULT nextval('public.tick
 --
 
 ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval('public.users_id_seq'::regclass);
+
+
+--
+-- Name: guests guests_guest_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.guests
+    ADD CONSTRAINT guests_guest_uuid_key UNIQUE (guest_uuid);
+
+
+--
+-- Name: guests guests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.guests
+    ADD CONSTRAINT guests_pkey PRIMARY KEY (id);
 
 
 --
@@ -519,6 +575,14 @@ ALTER TABLE ONLY public.tickets
 
 
 --
+-- Name: tickets uq_tickets_round_rank; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.tickets
+    ADD CONSTRAINT uq_tickets_round_rank UNIQUE (round_id, rank);
+
+
+--
 -- Name: users users_email_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -532,6 +596,13 @@ ALTER TABLE ONLY public.users
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: idx_guests_guest_uuid; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_guests_guest_uuid ON public.guests USING btree (guest_uuid);
 
 
 --
@@ -602,6 +673,20 @@ CREATE INDEX idx_tickets_user_issued ON public.tickets USING btree (user_id, iss
 --
 
 CREATE INDEX idx_users_role ON public.users USING btree (role);
+
+
+--
+-- Name: uq_live_sessions_round_guest_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_live_sessions_round_guest_active ON public.live_sessions USING btree (round_id, guest_uuid) WHERE ((guest_uuid IS NOT NULL) AND ((status)::text = ANY ((ARRAY['queued'::character varying, 'active'::character varying, 'completed'::character varying])::text[])));
+
+
+--
+-- Name: uq_live_sessions_round_user_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_live_sessions_round_user_active ON public.live_sessions USING btree (round_id, user_id) WHERE ((user_id IS NOT NULL) AND ((status)::text = ANY ((ARRAY['queued'::character varying, 'active'::character varying, 'completed'::character varying])::text[])));
 
 
 --
@@ -696,5 +781,5 @@ ALTER TABLE ONLY public.tickets
 -- PostgreSQL database dump complete
 --
 
-\unrestrict jW0itaSH1Q8EbhcaHBlHVhF5TmFtPghfw3V7mscJhZOZoJfDRaZSwVzEWcXTxa4
+\unrestrict AIOcECKxq9Z5T69S2R6fkc45oxPoSOJV2krX29XhogSzK6ac6zc7MzjkbXoutH6
 

@@ -1,6 +1,6 @@
 import { body, param, query } from "express-validator";
 
-const SEAT_LABEL_PATTERN = /^[A-Za-z0-9가-힣_-]+$/;
+const SEAT_LABEL_PATTERN = /^[A-Za-z0-9가-힣]+-\d+-\d+$/;
 
 const seatLabelsValidator = (value: unknown): true => {
   if (!Array.isArray(value)) {
@@ -19,7 +19,7 @@ const seatLabelsValidator = (value: unknown): true => {
     }
     if (!SEAT_LABEL_PATTERN.test(label)) {
       throw new Error(
-        "seat_label은 영문/숫자/한글/_/- 만 사용 가능합니다.",
+        "seat_label 은 'zoneId-row-col' 형식 (예: A-1-1) 이어야 합니다.",
       );
     }
     if (seen.has(label)) {

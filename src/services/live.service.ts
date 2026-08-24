@@ -130,58 +130,63 @@ const getNext = async (): Promise<RoundSummary | null> => {
   return result.rows[0] ? mapRound(result.rows[0]) : null;
 };
 
-// GET /api/live/recent-results?limit=N — 최근 종료 회차 요약 (각 회차별 top3)
-type RecentResult = RoundSummary & {
-  top3: Array<{
-    rank: number;
-    nickname: string;
-    seatLabel: string | null;
-    elapsedMs: number;
-    isMember: boolean;
-  }>;
+// GET /api/live/last-round?limit=N — 가장 최근 종료 회차 1개 + 상위 N명 랭킹
+type RankingEntry = {
+  rank: number;
+  nickname: string;
+  seatLabel: string | null;
+  elapsedMs: number;
+  isMember: boolean;
 };
 
-const getRecentResults = async (limit: number): Promise<RecentResult[]> => {
-  const roundsRes = await pool.query(
+type LastRoundResult = {
+  round: RoundSummary;
+  rankings: RankingEntry[];
+};
+
+const getLastRoundTopN = async (
+  limit: number,
+): Promise<LastRoundResult | null> => {
+  const roundRes = await pool.query(
     `SELECT id, opens_at, closes_at, event_id, status, seat_labels
      FROM live_rounds
      WHERE status = 'closed'
      ORDER BY closes_at DESC
-     LIMIT $1`,
-    [limit],
+     LIMIT 1`,
   );
-  if (roundsRes.rows.length === 0) return [];
+  if (roundRes.rows.length === 0) return null;
 
-  const roundIds = roundsRes.rows.map((r) => r.id);
-  const topsRes = await pool.query(
-    `SELECT round_id, nickname, seat_label, elapsed_ms, user_id, rank
-     FROM (
-       SELECT round_id, nickname, seat_label, elapsed_ms, user_id,
-              ROW_NUMBER() OVER (PARTITION BY round_id ORDER BY elapsed_ms ASC) AS rank
-       FROM live_sessions
-       WHERE round_id = ANY($1::int[]) AND status = 'completed'
-     ) ranked
-     WHERE rank <= 3`,
-    [roundIds],
+  const round = mapRound(roundRes.rows[0]);
+
+  const sessionsRes = await pool.query(
+    `SELECT nickname, seat_label, elapsed_ms, user_id
+     FROM live_sessions
+     WHERE round_id = $1 AND status = 'completed'
+     ORDER BY elapsed_ms ASC, completed_at ASC
+     LIMIT $2`,
+    [round.roundId, limit],
   );
 
-  const topsByRound = new Map<number, RecentResult["top3"]>();
-  for (const row of topsRes.rows) {
-    const list = topsByRound.get(row.round_id) ?? [];
-    list.push({
-      rank: Number(row.rank),
-      nickname: row.nickname,
-      seatLabel: row.seat_label,
-      elapsedMs: row.elapsed_ms,
-      isMember: row.user_id !== null,
-    });
-    topsByRound.set(row.round_id, list);
-  }
-
-  return roundsRes.rows.map((r) => ({
-    ...mapRound(r),
-    top3: topsByRound.get(r.id) ?? [],
+  const rankings: RankingEntry[] = sessionsRes.rows.map((row, index) => ({
+    rank: index + 1,
+    nickname: row.nickname,
+    seatLabel: row.seat_label,
+    elapsedMs: row.elapsed_ms,
+    isMember: row.user_id !== null,
   }));
+
+  return { round, rankings };
+};
+
+// GET /api/live/rounds/:roundId — 특정 회차 상세 조회
+const getRoundById = async (roundId: number): Promise<RoundSummary | null> => {
+  const result = await pool.query(
+    `SELECT id, opens_at, closes_at, event_id, status, seat_labels
+     FROM live_rounds
+     WHERE id = $1`,
+    [roundId],
+  );
+  return result.rows[0] ? mapRound(result.rows[0]) : null;
 };
 
 export {
@@ -190,5 +195,6 @@ export {
   transitionRounds,
   getCurrent,
   getNext,
-  getRecentResults,
+  getLastRoundTopN,
+  getRoundById,
 };

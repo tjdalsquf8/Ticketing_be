@@ -11,13 +11,19 @@ type LiveConfig = {
   updatedAt: string;
 };
 
-const getLiveConfig = async (): Promise<LiveConfig | null> => {
+const getLiveConfig = async (): Promise<LiveConfig> => {
   const result = await pool.query(
     `SELECT default_event_id, default_seat_labels, excluded_hours, updated_by, updated_at
      FROM live_config WHERE id = 1`,
   );
   const row = result.rows[0];
-  if (!row) return null;
+  if (!row) {
+    throw new AppError(
+      404,
+      "CONFIG_NOT_INITIALIZED",
+      "설정이 초기화되지 않았습니다. PUT /admin/live/config/event 로 먼저 저장하세요.",
+    );
+  }
   return {
     defaultEventId: row.default_event_id,
     defaultSeatLabels: row.default_seat_labels,
