@@ -75,6 +75,25 @@ export const liveLimiter = rateLimit({
   ),
 });
 
+// 티켓 조회 API 전용. 인증 사용자가 ticketId 를 순차 열거(오라클 공격)하거나
+// 대량 폴링으로 DB 를 태우는 것을 방지. user.id 기준으로 카운트해
+// 같은 IP 를 공유하는 다른 사용자에게 영향이 없도록 한다.
+export const ticketsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInTest,
+  keyGenerator: (req: Request, res: Response) =>
+    req.user?.id
+      ? `tickets:${req.user.id}`
+      : ipKeyGenerator(req.ip ?? "unknown"),
+  handler: envelopeHandler(
+    "TOO_MANY_TICKET_REQUESTS",
+    "티켓 조회 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
+  ),
+});
+
 // 관리자 라우트 전용. requireAdmin 이 매 요청마다 users.role DB 조회를 하므로
 // 토큰 탈취/오작동 클라이언트가 대량 폴링 시 DB 커넥션 풀이 소진될 수 있음.
 // authMiddleware 뒤에 배치해 인증된 요청 기준으로 카운트하고, 인증된 유저 id 를

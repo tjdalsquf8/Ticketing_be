@@ -7,6 +7,7 @@ import guestsRouter from "./guests.routes";
 import adminRouter from "./admin.routes";
 import liveRouter from "./live.routes";
 import timeRouter from "./time.routes";
+import ticketsRouter from "./tickets.routes";
 
 const router = Router();
 
@@ -18,5 +19,6 @@ router.use("/guests", guestsRouter);
 router.use("/admin", adminRouter);
 router.use("/live", liveRouter);
 router.use("/time", timeRouter);
+router.use("/tickets", ticketsRouter);
 
 export default router;
