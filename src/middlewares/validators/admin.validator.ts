@@ -50,10 +50,10 @@ const excludedHoursValidator = (value: unknown): true => {
   return true;
 };
 
-const putConfigEventValidator = [
-  body("defaultEventId")
-    .notEmpty().withMessage("defaultEventId는 필수입니다.")
-    .isInt({ min: 1 }).withMessage("defaultEventId는 1 이상의 정수여야 합니다."),
+const putConfigVenueValidator = [
+  body("defaultVenueId")
+    .notEmpty().withMessage("defaultVenueId는 필수입니다.")
+    .isInt({ min: 1 }).withMessage("defaultVenueId는 1 이상의 정수여야 합니다."),
   body("defaultSeatLabels").custom(seatLabelsValidator),
 ];
 
@@ -82,9 +82,21 @@ const roundIdParamValidator = [
   param("roundId").isInt({ min: 1 }).withMessage("roundId는 1 이상의 정수여야 합니다."),
 ];
 
+const CRON_JOBS = ["ensure", "transition"] as const;
+
+const runCronValidator = [
+  body("job")
+    .notEmpty().withMessage("job은 필수입니다.")
+    .isIn(CRON_JOBS).withMessage(`job은 ${CRON_JOBS.join("|")} 중 하나여야 합니다.`),
+  body("fromMidnight")
+    .optional()
+    .isBoolean().withMessage("fromMidnight는 boolean이어야 합니다."),
+];
+
 export {
-  putConfigEventValidator,
+  putConfigVenueValidator,
   putConfigScheduleValidator,
   listRoundsValidator,
   roundIdParamValidator,
+  runCronValidator,
 };

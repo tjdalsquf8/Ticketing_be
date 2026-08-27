@@ -1,6 +1,11 @@
 import { body, param, query } from "express-validator";
 
-const SEAT_LABEL_PATTERN = /^[A-Za-z0-9가-힣]+-\d+-\d+$/;
+// 좌석 라벨: '{zoneId}-{rowLabel}-{seatNumber}' 3-segment 형식 (프론트 계약)
+// - zoneId: 1~32자, 영문/숫자/한글/언더스코어 (하이픈 금지 — 세그먼트 파싱 모호성 방지)
+// - rowLabel: 1~16자, 동일 문자셋
+// - seatNumber: 1~999, 앞자리 0 금지
+// 예: FC-1-1, 101-1-6, R-1L앞-24, GA-스탠딩L-31
+const SEAT_LABEL_PATTERN = /^[A-Za-z0-9가-힣_]{1,32}-[A-Za-z0-9가-힣_]{1,16}-[1-9]\d{0,2}$/;
 
 /** roundId 경로 파라미터 — 양수 정수 */
 const roundIdParamValidator = [
@@ -37,7 +42,7 @@ const holdBodyValidator = [
     .isLength({ min: 1, max: 32 })
     .withMessage("seatLabel은 1~32자여야 합니다.")
     .matches(SEAT_LABEL_PATTERN)
-    .withMessage("seatLabel 은 'zoneId-row-col' 형식 (예: A-1-1) 이어야 합니다."),
+    .withMessage("seatLabel은 '{zoneId}-{rowLabel}-{seatNumber}' 3-segment 형식이어야 합니다 (예: FC-1-1, GA-스탠딩L-3-1)."),
 ];
 
 /** POST /sessions/:sessionId/confirm body */
@@ -49,7 +54,7 @@ const confirmBodyValidator = [
     .isLength({ min: 1, max: 32 })
     .withMessage("seatLabel은 1~32자여야 합니다.")
     .matches(SEAT_LABEL_PATTERN)
-    .withMessage("seatLabel 은 'zoneId-row-col' 형식 (예: A-1-1) 이어야 합니다."),
+    .withMessage("seatLabel은 '{zoneId}-{rowLabel}-{seatNumber}' 3-segment 형식이어야 합니다 (예: FC-1-1, GA-스탠딩L-3-1)."),
 ];
 
 /** GET /last-round?limit=N — 선택적 limit 파라미터 (1~30 정수) */

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { validationResult } from "express-validator";
 import * as adminService from "../services/admin.service";
+import * as liveService from "../services/live.service";
 import { AppError } from "../middlewares/errorHandler";
 
 const handleValidation = (req: Request, next: NextFunction): boolean => {
@@ -20,19 +21,19 @@ const getLiveConfig = async (_req: Request, res: Response) => {
   res.status(200).json({ success: true, data: config });
 };
 
-// PUT /api/admin/live/config/event — 공연 배치만 저장 (excluded_hours 유지)
-const putLiveConfigEvent = async (
+// PUT /api/admin/live/config/venue — 공연장·좌석 배치만 저장 (excluded_hours 유지)
+const putLiveConfigVenue = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ) => {
   if (handleValidation(req, next)) return;
 
-  const { defaultEventId, defaultSeatLabels } = req.body;
+  const { defaultVenueId, defaultSeatLabels } = req.body;
   const updatedBy = req.user!.id;
 
-  const config = await adminService.upsertLiveConfigEvent({
-    defaultEventId: Number(defaultEventId),
+  const config = await adminService.upsertLiveConfigVenue({
+    defaultVenueId: Number(defaultVenueId),
     defaultSeatLabels,
     updatedBy,
   });
@@ -98,11 +99,77 @@ const getRoundDetail = async (
   res.status(200).json({ success: true, data });
 };
 
+// GET /api/admin/live/rounds/:roundId/stats — 라이브 라운드 결과 통계
+const getRoundStats = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  if (handleValidation(req, next)) return;
+
+  try {
+    const roundId = parseInt(req.params.roundId as string, 10);
+    const data = await liveService.getRoundStats(roundId);
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    if (
+      err != null &&
+      typeof err === "object" &&
+      "code" in err &&
+      "status" in err &&
+      "message" in err
+    ) {
+      const e = err as { code: string; status: number; message: string };
+      if (typeof e.status === "number" && typeof e.code === "string") {
+        next(new AppError(e.status, e.code, e.message));
+        return;
+      }
+    }
+    next(err);
+  }
+};
+
+// POST /api/admin/live/cron/run — 크론 작업 수동 실행 (서버 다운타임 백필/디버깅용)
+const runCron = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  if (handleValidation(req, next)) return;
+
+  const job = req.body.job as "ensure" | "transition";
+  const fromMidnight = req.body.fromMidnight === true;
+
+  const startedAt = Date.now();
+  try {
+    switch (job) {
+      case "ensure":
+        await liveService.ensureUpcomingRounds(fromMidnight);
+        break;
+      case "transition":
+        await liveService.transitionRounds();
+        break;
+    }
+    res.status(200).json({
+      success: true,
+      data: {
+        job,
+        fromMidnight: job === "ensure" ? fromMidnight : undefined,
+        durationMs: Date.now() - startedAt,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export {
   getLiveConfig,
-  putLiveConfigEvent,
+  putLiveConfigVenue,
   putLiveConfigSchedule,
   listRounds,
   cancelRound,
   getRoundDetail,
+  getRoundStats,
+  runCron,
 };
