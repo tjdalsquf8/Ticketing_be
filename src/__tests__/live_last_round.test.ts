@@ -47,7 +47,7 @@ describe("GET /api/live/last-round", () => {
 
   it("[2] closed 회차에 completed 세션 있으면 rankings 반환 + elapsed_ms ASC 정렬", async () => {
     // closed 회차 생성
-    const { roundId, eventId } = await createTestRound({
+    const { roundId } = await createTestRound({
       status: "closed",
       opensOffsetSeconds: -120,
       closesOffsetSeconds: -1,

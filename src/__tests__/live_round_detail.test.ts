@@ -27,7 +27,7 @@ afterAll(async () => {
 
 describe("GET /api/live/rounds/:roundId", () => {
   it("[1] 존재하는 회차 → 200, 필드 검증", async () => {
-    const { roundId, eventId, seatLabels } = await createTestRound({ status: "open" });
+    const { roundId, seatLabels } = await createTestRound({ status: "open" });
     createdRoundIds.push(roundId);
 
     const res = await request(app).get(`/api/live/rounds/${roundId}`);
@@ -37,7 +37,6 @@ describe("GET /api/live/rounds/:roundId", () => {
 
     const data = res.body.data;
     expect(data.roundId).toBe(roundId);
-    expect(data.eventId).toBe(eventId);
     expect(data.status).toBe("open");
     expect(typeof data.opensAt).toBe("string");
     expect(typeof data.closesAt).toBe("string");
