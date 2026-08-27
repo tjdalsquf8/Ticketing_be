@@ -18,25 +18,25 @@ type RoundSummary = {
   roundId: number;
   opensAt: string;
   closesAt: string;
-  eventId: number;
   status: "scheduled" | "open" | "closed" | "cancelled";
   totalSeats: number;
+  venueId: string;  // slug 문자열
 };
 
 const mapRound = (row: {
   id: number;
   opens_at: string;
   closes_at: string;
-  event_id: number;
   status: RoundSummary["status"];
   seat_labels: string[];
+  venue_slug?: string;
 }): RoundSummary => ({
   roundId: row.id,
   opensAt: row.opens_at,
   closesAt: row.closes_at,
-  eventId: row.event_id,
   status: row.status,
   totalSeats: Array.isArray(row.seat_labels) ? row.seat_labels.length : 0,
+  venueId: row.venue_slug ?? "",
 });
 
 // ─── Scheduler operations (called from cron) ─────────────────
@@ -46,7 +46,8 @@ const mapRound = (row: {
 // - fromMidnight=false: 다음 정각 ~ KST 오늘 23시 (서버 부팅 시 남은 오늘 슬롯만 채움)
 // - live_config 없으면 CROSS JOIN 결과 0행 → 아무것도 안 만듦 (부트스트랩 안전 가드)
 // - excluded_hours (KST 기준 0~23시)에 해당하는 정각은 생성 스킵
-// - 관리자가 config를 갱신하면 이후 정각부터 새 event/seat로 반영됨 (기존 회차는 스냅샷 유지)
+// - venue_id 는 live_config.default_venue_id 를 그대로 복사 (events 결합 없음)
+// - 관리자가 config를 갱신하면 이후 정각부터 새 venue/seat로 반영됨 (기존 회차는 스냅샷 유지)
 // - 기존 회차 존재 시 ON CONFLICT (opens_at) DO NOTHING
 const ensureUpcomingRounds = async (
   fromMidnight: boolean = false,
@@ -59,10 +60,10 @@ const ensureUpcomingRounds = async (
   // ROUND_DURATION_MINUTES 는 파라미터 바인딩($1)으로 전달해 문자열 인터폴레이션을 제거.
   // make_interval(mins => $1) 로 안전하게 INTERVAL 로 변환.
   await pool.query(
-    `INSERT INTO live_rounds (opens_at, closes_at, event_id, seat_labels, status)
+    `INSERT INTO live_rounds (opens_at, closes_at, venue_id, seat_labels, status)
      SELECT slot.ts,
             slot.ts + make_interval(mins => $1::int),
-            cfg.default_event_id,
+            cfg.default_venue_id,
             cfg.default_seat_labels,
             'scheduled'
      FROM generate_series(
@@ -71,7 +72,7 @@ const ensureUpcomingRounds = async (
             INTERVAL '1 hour'
           ) AS slot(ts)
      CROSS JOIN (
-       SELECT default_event_id, default_seat_labels, excluded_hours FROM live_config WHERE id = 1
+       SELECT default_venue_id, default_seat_labels, excluded_hours FROM live_config WHERE id = 1
      ) cfg
      WHERE NOT (
        EXTRACT(HOUR FROM slot.ts AT TIME ZONE 'Asia/Seoul')::int = ANY(cfg.excluded_hours)
@@ -109,10 +110,12 @@ const transitionRounds = async (): Promise<void> => {
 // GET /api/live/current — 지금 진행중 회차 (없으면 null)
 const getCurrent = async (): Promise<RoundSummary | null> => {
   const result = await pool.query(
-    `SELECT id, opens_at, closes_at, event_id, status, seat_labels
-     FROM live_rounds
-     WHERE status = 'open'
-     ORDER BY opens_at DESC
+    `SELECT r.id, r.opens_at, r.closes_at, r.status, r.seat_labels,
+            v.slug AS venue_slug
+     FROM live_rounds r
+     JOIN public.venues v ON v.id = r.venue_id
+     WHERE r.status = 'open'
+     ORDER BY r.opens_at DESC
      LIMIT 1`,
   );
   return result.rows[0] ? mapRound(result.rows[0]) : null;
@@ -121,10 +124,12 @@ const getCurrent = async (): Promise<RoundSummary | null> => {
 // GET /api/live/next — 다음 예정 회차 (없으면 null)
 const getNext = async (): Promise<RoundSummary | null> => {
   const result = await pool.query(
-    `SELECT id, opens_at, closes_at, event_id, status, seat_labels
-     FROM live_rounds
-     WHERE status = 'scheduled' AND opens_at > NOW()
-     ORDER BY opens_at ASC
+    `SELECT r.id, r.opens_at, r.closes_at, r.status, r.seat_labels,
+            v.slug AS venue_slug
+     FROM live_rounds r
+     JOIN public.venues v ON v.id = r.venue_id
+     WHERE r.status = 'scheduled' AND r.opens_at > NOW()
+     ORDER BY r.opens_at ASC
      LIMIT 1`,
   );
   return result.rows[0] ? mapRound(result.rows[0]) : null;
@@ -148,10 +153,12 @@ const getLastRoundTopN = async (
   limit: number,
 ): Promise<LastRoundResult | null> => {
   const roundRes = await pool.query(
-    `SELECT id, opens_at, closes_at, event_id, status, seat_labels
-     FROM live_rounds
-     WHERE status = 'closed'
-     ORDER BY closes_at DESC
+    `SELECT r.id, r.opens_at, r.closes_at, r.status, r.seat_labels,
+            v.slug AS venue_slug
+     FROM live_rounds r
+     JOIN public.venues v ON v.id = r.venue_id
+     WHERE r.status = 'closed'
+     ORDER BY r.closes_at DESC
      LIMIT 1`,
   );
   if (roundRes.rows.length === 0) return null;
@@ -181,12 +188,82 @@ const getLastRoundTopN = async (
 // GET /api/live/rounds/:roundId — 특정 회차 상세 조회
 const getRoundById = async (roundId: number): Promise<RoundSummary | null> => {
   const result = await pool.query(
-    `SELECT id, opens_at, closes_at, event_id, status, seat_labels
-     FROM live_rounds
-     WHERE id = $1`,
+    `SELECT r.id, r.opens_at, r.closes_at, r.status, r.seat_labels,
+            v.slug AS venue_slug
+     FROM live_rounds r
+     JOIN public.venues v ON v.id = r.venue_id
+     WHERE r.id = $1`,
     [roundId],
   );
   return result.rows[0] ? mapRound(result.rows[0]) : null;
+};
+
+// ─── 관리자 통계 ─────────────────────────────────────────────────────────────
+
+export interface RoundStatsRow {
+  roundId: number;
+  status: string;
+  registered: number;
+  ticketed: number;
+  noShow: number;
+  netRevenue: number;
+}
+
+/**
+ * 관리자 라이브 라운드 통계 (결과 집계 전용).
+ *
+ * 필드:
+ *   registered — 그 라운드에 참여 시도한 총 세션 수 (상태 무관).
+ *   ticketed   — 티켓 발급 성공 수 (tickets.round_id = roundId).
+ *   noShow     — active 진입 후 좌석 확정 못 한 세션 수
+ *                (live_sessions.status != 'completed' — queued/active/failed 포함).
+ *   netRevenue — 라이브는 참가비 없으므로 항상 0.
+ *
+ * 라이브 세션은 completed = 좌석 확정 완료. 그 외 상태는 좌석을 못 잡은 것.
+ */
+const getRoundStats = async (roundId: number): Promise<RoundStatsRow> => {
+  // 라운드 존재 여부 확인
+  const roundRes = await pool.query(
+    `SELECT status FROM live_rounds WHERE id = $1`,
+    [roundId],
+  );
+  if (roundRes.rows.length === 0) {
+    const err = new Error("회차를 찾을 수 없습니다") as Error & {
+      code: string;
+      status: number;
+    };
+    err.code = "ROUND_NOT_FOUND";
+    err.status = 404;
+    throw err;
+  }
+
+  // 세션 집계: 한 쿼리로 registered / noShow 산출
+  const sessionStatsRes = await pool.query(
+    `SELECT
+       COUNT(*)                                         AS registered,
+       COUNT(*) FILTER (WHERE status != 'completed')   AS no_show
+     FROM live_sessions
+     WHERE round_id = $1`,
+    [roundId],
+  );
+
+  // 티켓 발급 수: tickets.round_id = roundId
+  const ticketRes = await pool.query(
+    `SELECT COUNT(*) AS ticketed FROM tickets WHERE round_id = $1`,
+    [roundId],
+  );
+
+  const sRow = sessionStatsRes.rows[0];
+  const tRow = ticketRes.rows[0];
+
+  return {
+    roundId,
+    status:     roundRes.rows[0].status as string,
+    registered: parseInt(sRow.registered, 10),
+    ticketed:   parseInt(tRow.ticketed,   10),
+    noShow:     parseInt(sRow.no_show,    10),
+    netRevenue: 0,
+  };
 };
 
 export {
@@ -197,4 +274,5 @@ export {
   getNext,
   getLastRoundTopN,
   getRoundById,
+  getRoundStats,
 };

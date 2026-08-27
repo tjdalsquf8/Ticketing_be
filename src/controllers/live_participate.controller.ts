@@ -13,7 +13,15 @@ import { AppError } from "../middlewares/errorHandler";
 function handleValidation(req: Request, next: NextFunction): boolean {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    next(new AppError(422, "VALIDATION_ERROR", errors.array()[0].msg));
+    const first = errors.array()[0] as { msg: string; path?: string; param?: string };
+    // seatLabel 형식 위반은 프론트에서 별도 UX(좌석맵 즉시 refresh 등)로 다루도록
+    // 전용 코드 노출. 그 외 필드는 일반 VALIDATION_ERROR 유지.
+    const field = first.path ?? first.param;
+    if (field === "seatLabel") {
+      next(new AppError(422, "INVALID_SEAT_LABEL", first.msg));
+      return true;
+    }
+    next(new AppError(422, "VALIDATION_ERROR", first.msg));
     return true;
   }
   return false;
@@ -26,10 +34,12 @@ function handleValidation(req: Request, next: NextFunction): boolean {
  *   ROUND_NOT_OPEN      → 409
  *   SESSION_NOT_FOUND   → 404
  *   FORBIDDEN           → 404  (세션 존재 여부 오라클 차단: 소유자 불일치도 "없음"으로 응답)
- *   NOT_ACTIVE          → 403
- *   SEAT_UNAVAILABLE    → 409
- *   HOLD_EXPIRED        → 409
- *   기타                → next(err) 로 전역 핸들러 위임
+ *   NOT_ACTIVE              → 403
+ *   SEAT_ALREADY_HELD       → 409  (다른 세션이 임시 점유 중)
+ *   SEAT_ALREADY_CONFIRMED  → 409  (이미 확정·판매됨)
+ *   SEAT_UNAVAILABLE        → 409  (그 외 비정상 상태 fallback)
+ *   HOLD_EXPIRED            → 409
+ *   기타                     → next(err) 로 전역 핸들러 위임
  */
 function handleServiceError(err: unknown, next: NextFunction): void {
   if (
@@ -55,6 +65,8 @@ function handleServiceError(err: unknown, next: NextFunction): void {
       case "NOT_ACTIVE":
         next(new AppError(403, e.code, e.message));
         return;
+      case "SEAT_ALREADY_HELD":
+      case "SEAT_ALREADY_CONFIRMED":
       case "SEAT_UNAVAILABLE":
         next(new AppError(409, e.code, e.message));
         return;

@@ -275,7 +275,7 @@ async function getSeats(params: {
   const { sessionId, userId, guestUuid } = params;
 
   const sessionRes = await pool.query(
-    `SELECT id, session_id, round_id, status, user_id, guest_uuid
+    `SELECT id, session_id, round_id, event_id, status, user_id, guest_uuid
      FROM live_sessions
      WHERE session_id = $1`,
     [sessionId],
@@ -292,13 +292,17 @@ async function getSeats(params: {
     throw makeError("NOT_ACTIVE", 403, "active 상태의 세션만 좌석을 조회할 수 있습니다");
   }
 
-  const roundId: number = session.round_id;
   const actorKey = buildActorKey(userId, guestUuid);
+
+  // round_id(라이브) 또는 event_id(이벤트) 기반으로 분기
+  const isEventSession = session.round_id == null && session.event_id != null;
+  const contextCol = isEventSession ? "event_id" : "round_id";
+  const contextId: number = isEventSession ? session.event_id : session.round_id;
 
   // 좌석 목록 조회
   const seatsRes = await pool.query(
-    `SELECT seat_label, status FROM live_seats WHERE round_id = $1 ORDER BY seat_label ASC`,
-    [roundId],
+    `SELECT seat_label, status FROM live_seats WHERE ${contextCol} = $1 ORDER BY seat_label ASC`,
+    [contextId],
   );
 
   // 본인 hold 조회
@@ -306,8 +310,8 @@ async function getSeats(params: {
     `SELECT ls.seat_label, lh.expires_at
      FROM live_holds lh
      JOIN live_seats ls ON ls.id = lh.seat_id
-     WHERE lh.round_id = $1 AND lh.actor_key = $2`,
-    [roundId, actorKey],
+     WHERE lh.${contextCol} = $1 AND lh.actor_key = $2`,
+    [contextId, actorKey],
   );
 
   const myHold =
@@ -333,7 +337,10 @@ async function getSeats(params: {
  * 사용자가 좌석을 선택할 때 호출한다. 30초 동안 해당 좌석을 예약 대기 상태로 잠근다.
  * - 세션 소유자·active 상태·회차 open 상태를 모두 검증한다.
  * - 이미 본인이 hold 한 좌석이 있으면 그 hold 를 먼저 해제하고 새 좌석을 잡는다.
- * - 대상 좌석이 이미 held 또는 sold 라면 SEAT_UNAVAILABLE 에러를 반환한다.
+ * - 대상 좌석 상태별 에러 분기:
+ *     held → SEAT_ALREADY_HELD (다른 세션이 임시 점유 중)
+ *     sold → SEAT_ALREADY_CONFIRMED (이미 확정·판매됨)
+ *     그 외 비정상 상태 → SEAT_UNAVAILABLE (fallback)
  * - 성공 시 좌석 label 과 만료 시각(expiresAt)을 반환한다.
  */
 async function holdSeat(params: {
@@ -346,7 +353,7 @@ async function holdSeat(params: {
 
   // 세션 조회
   const sessionRes = await pool.query(
-    `SELECT id, session_id, round_id, status, user_id, guest_uuid
+    `SELECT id, session_id, round_id, event_id, status, user_id, guest_uuid
      FROM live_sessions
      WHERE session_id = $1`,
     [sessionId],
@@ -361,15 +368,20 @@ async function holdSeat(params: {
     throw makeError("NOT_ACTIVE", 403, "active 상태의 세션만 좌석을 점유할 수 있습니다");
   }
 
-  const roundId: number = session.round_id;
+  // round_id(라이브) 또는 event_id(이벤트) 기반으로 분기
+  const isEventSession = session.round_id == null && session.event_id != null;
+  const contextCol = isEventSession ? "event_id" : "round_id";
+  const contextId: number = isEventSession ? session.event_id : session.round_id;
 
-  // 회차 open 검증
-  const roundRes = await pool.query(
-    `SELECT status FROM live_rounds WHERE id = $1`,
-    [roundId],
-  );
-  if (roundRes.rows[0].status !== "open") {
-    throw makeError("ROUND_NOT_OPEN", 400, "회차가 종료되어 좌석을 점유할 수 없습니다");
+  // 라이브 세션만 회차 open 검증 (이벤트 세션은 event.status = 'open' 이 보장됨)
+  if (!isEventSession) {
+    const roundRes = await pool.query(
+      `SELECT status FROM live_rounds WHERE id = $1`,
+      [contextId],
+    );
+    if (roundRes.rows[0].status !== "open") {
+      throw makeError("ROUND_NOT_OPEN", 400, "회차가 종료되어 좌석을 점유할 수 없습니다");
+    }
   }
 
   const actorKey = buildActorKey(userId, guestUuid);
@@ -389,15 +401,25 @@ async function holdSeat(params: {
     const prevHoldLookup = await client.query(
       `SELECT lh.id AS hold_id, lh.seat_id AS prev_seat_id
        FROM live_holds lh
-       WHERE lh.round_id = $1 AND lh.actor_key = $2`,
-      [roundId, actorKey],
+       WHERE lh.${contextCol} = $1 AND lh.actor_key = $2`,
+      [contextId, actorKey],
     );
     const prevHold = prevHoldLookup.rows[0] ?? null;
 
     // 2) 대상 좌석 id 조회 (락 없음)
+    // 이벤트 세션: live_seats 레코드가 없으면 upsert (FE가 좌석 카탈로그 소유)
+    if (isEventSession) {
+      await client.query(
+        `INSERT INTO live_seats (event_id, seat_label)
+         VALUES ($1, $2)
+         ON CONFLICT DO NOTHING`,
+        [contextId, seatLabel],
+      );
+    }
+
     const targetSeatLookup = await client.query(
-      `SELECT id FROM live_seats WHERE round_id = $1 AND seat_label = $2`,
-      [roundId, seatLabel],
+      `SELECT id FROM live_seats WHERE ${contextCol} = $1 AND seat_label = $2`,
+      [contextId, seatLabel],
     );
     if (targetSeatLookup.rows.length === 0) {
       await client.query("ROLLBACK");
@@ -438,20 +460,39 @@ async function holdSeat(params: {
     const isSelfReHold = prevHold != null && prevHold.prev_seat_id === targetSeatId;
     if (targetSeat.status !== "available" && !isSelfReHold) {
       await client.query("ROLLBACK");
+      if (targetSeat.status === "held") {
+        throw makeError("SEAT_ALREADY_HELD", 409, "다른 사용자가 이 좌석을 잠시 잡고 있습니다.");
+      }
+      if (targetSeat.status === "sold") {
+        throw makeError("SEAT_ALREADY_CONFIRMED", 409, "이미 판매된 좌석입니다.");
+      }
       throw makeError("SEAT_UNAVAILABLE", 409, "이미 선택된 좌석입니다");
     }
 
     // hold INSERT (TTL = config.live.holdTtlSeconds 초)
+    // 라이브: (round_id, actor_key) unique / 이벤트: (event_id, actor_key) unique partial index
     const expiresAt = new Date(Date.now() + config.live.holdTtlSeconds * 1000);
-    await client.query(
-      `INSERT INTO live_holds (round_id, seat_id, actor_key, expires_at)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (round_id, actor_key) DO UPDATE
-         SET seat_id = EXCLUDED.seat_id,
-             expires_at = EXCLUDED.expires_at,
-             created_at = NOW()`,
-      [roundId, targetSeatId, actorKey, expiresAt.toISOString()],
-    );
+    if (isEventSession) {
+      await client.query(
+        `INSERT INTO live_holds (event_id, seat_id, actor_key, expires_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (event_id, actor_key) WHERE event_id IS NOT NULL DO UPDATE
+           SET seat_id = EXCLUDED.seat_id,
+               expires_at = EXCLUDED.expires_at,
+               created_at = NOW()`,
+        [contextId, targetSeatId, actorKey, expiresAt.toISOString()],
+      );
+    } else {
+      await client.query(
+        `INSERT INTO live_holds (round_id, seat_id, actor_key, expires_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (round_id, actor_key) DO UPDATE
+           SET seat_id = EXCLUDED.seat_id,
+               expires_at = EXCLUDED.expires_at,
+               created_at = NOW()`,
+        [contextId, targetSeatId, actorKey, expiresAt.toISOString()],
+      );
+    }
 
     // 좌석 상태 → held
     await client.query(
@@ -491,7 +532,7 @@ async function confirmSeat(params: {
 
   // 세션 조회 (started_at 포함 — 서버 경과 시간 계산용)
   const sessionRes = await pool.query(
-    `SELECT id, session_id, round_id, status, user_id, guest_uuid, nickname, started_at
+    `SELECT id, session_id, round_id, event_id, status, user_id, guest_uuid, nickname, started_at
      FROM live_sessions
      WHERE session_id = $1`,
     [sessionId],
@@ -506,18 +547,29 @@ async function confirmSeat(params: {
     throw makeError("NOT_ACTIVE", 403, "active 상태의 세션만 구매를 확정할 수 있습니다");
   }
 
-  const roundId: number = session.round_id;
+  // round_id(라이브) 또는 event_id(이벤트) 기반으로 분기
+  const isEventSession = session.round_id == null && session.event_id != null;
+  const contextCol = isEventSession ? "event_id" : "round_id";
+  const contextId: number = isEventSession ? session.event_id : session.round_id;
   const sessionDbId: number = session.id;
 
-  // 회차 open 검증
-  const roundRes = await pool.query(
-    `SELECT status, event_id FROM live_rounds WHERE id = $1`,
-    [roundId],
-  );
-  if (roundRes.rows[0].status !== "open") {
-    throw makeError("ROUND_NOT_OPEN", 400, "회차가 종료되어 구매를 확정할 수 없습니다");
+  // 티켓 저장용 event_id 결정:
+  //   - 이벤트 세션: contextId 그대로 사용 (tickets.event_id = event_id, round_id=NULL)
+  //   - 라이브 세션: event_id NULL (tickets.round_id = round_id, event_id=NULL)
+  let ticketEventId: number | null;
+  if (isEventSession) {
+    ticketEventId = contextId;
+  } else {
+    // 라이브 세션: 회차 open 검증만 수행
+    const roundRes = await pool.query(
+      `SELECT status FROM live_rounds WHERE id = $1`,
+      [contextId],
+    );
+    if (roundRes.rows[0].status !== "open") {
+      throw makeError("ROUND_NOT_OPEN", 400, "회차가 종료되어 구매를 확정할 수 없습니다");
+    }
+    ticketEventId = null;
   }
-  const eventId: number = roundRes.rows[0].event_id;
 
   const actorKey = buildActorKey(userId, guestUuid);
 
@@ -536,10 +588,10 @@ async function confirmSeat(params: {
       `SELECT lh.id AS hold_id, lh.expires_at, ls.id AS seat_id
        FROM live_holds lh
        JOIN live_seats ls ON ls.id = lh.seat_id
-       WHERE lh.round_id = $1 AND lh.actor_key = $2
+       WHERE lh.${contextCol} = $1 AND lh.actor_key = $2
          AND ls.seat_label = $3
        FOR UPDATE`,
-      [roundId, actorKey, seatLabel],
+      [contextId, actorKey, seatLabel],
     );
     if (holdRes.rows.length === 0 || new Date(holdRes.rows[0].expires_at) < new Date()) {
       await client.query("ROLLBACK");
@@ -565,12 +617,12 @@ async function confirmSeat(params: {
       [serverElapsedMs, seatLabel, sessionDbId],
     );
 
-    // 회차 내 완료 순위 계산 (elapsed_ms ASC)
+    // 세션 컨텍스트 내 완료 순위 계산 (elapsed_ms ASC)
     const rankRes = await client.query(
       `SELECT COUNT(*) AS rank
        FROM live_sessions
-       WHERE round_id = $1 AND status = 'completed' AND elapsed_ms <= $2`,
-      [roundId, serverElapsedMs],
+       WHERE ${contextCol} = $1 AND status = 'completed' AND elapsed_ms <= $2`,
+      [contextId, serverElapsedMs],
     );
     const rank = parseInt(rankRes.rows[0].rank, 10);
 
@@ -586,9 +638,22 @@ async function confirmSeat(params: {
         .substring(0, 12)
         .toUpperCase();
 
+      // 이벤트 세션: event_registrations.status → ticketed, ticket_id 업데이트
+      if (isEventSession) {
+        await client.query(
+          `UPDATE public.event_registrations
+           SET status = 'entered'
+           WHERE event_id = $1 AND user_id = $2 AND status IN ('pending', 'entered')`,
+          [ticketEventId, sessionUserId],
+        );
+      }
+
       // tickets INSERT — uq_tickets_round_rank (round_id, rank) unique 제약으로
       // 동시 confirm 시 중복 rank INSERT 가 차단된다.
       // unique violation(PG code 23505) 발생 시 MAX(rank)+1 로 재계산 후 최대 3회 재시도.
+      // 이벤트 세션은 round_id=NULL 로 INSERT (tickets.round_id NOT NULL이므로 별도 처리)
+      const roundIdForTicket: number | null = isEventSession ? null : contextId;
+
       let insertedRank = rank;
       let insertAttempt = 0;
       while (insertAttempt < 3) {
@@ -602,8 +667,8 @@ async function confirmSeat(params: {
             [
               sessionDbId,
               sessionUserId,
-              roundId,
-              eventId,
+              roundIdForTicket,
+              ticketEventId,
               session.nickname,
               serial,
               seatLabel,
@@ -612,6 +677,16 @@ async function confirmSeat(params: {
             ],
           );
           ticketId = insertRes.rows[0]?.id ?? null;
+
+          // 이벤트 세션: event_registrations.ticket_id 연결 + status → ticketed
+          if (isEventSession && ticketId != null) {
+            await client.query(
+              `UPDATE public.event_registrations
+               SET status = 'ticketed', ticket_id = $1
+               WHERE event_id = $2 AND user_id = $3 AND status = 'entered'`,
+              [ticketId, ticketEventId, sessionUserId],
+            );
+          }
           break;
         } catch (insertErr: unknown) {
           // PostgreSQL unique violation: error code 23505
@@ -620,8 +695,8 @@ async function confirmSeat(params: {
             // 현재 최대 rank + 1 로 재계산
             const maxRankRes = await client.query(
               `SELECT COALESCE(MAX(rank), 0) + 1 AS next_rank
-               FROM tickets WHERE round_id = $1`,
-              [roundId],
+               FROM tickets WHERE ${contextCol} = $1`,
+              [contextId],
             );
             insertedRank = maxRankRes.rows[0].next_rank as number;
             insertAttempt++;

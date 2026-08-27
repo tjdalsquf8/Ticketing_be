@@ -8,6 +8,7 @@ import adminRouter from "./admin.routes";
 import liveRouter from "./live.routes";
 import timeRouter from "./time.routes";
 import ticketsRouter from "./tickets.routes";
+import eventsRouter from "./events.routes";
 
 const router = Router();
 
@@ -20,5 +21,6 @@ router.use("/admin", adminRouter);
 router.use("/live", liveRouter);
 router.use("/time", timeRouter);
 router.use("/tickets", ticketsRouter);
+router.use("/events", eventsRouter);
 
 export default router;

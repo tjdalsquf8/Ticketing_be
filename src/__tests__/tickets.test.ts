@@ -33,11 +33,10 @@ async function loginAgent(email: string, password: string) {
   return agent;
 }
 
-/** 티켓 직접 삽입 헬퍼 */
+/** 티켓 직접 삽입 헬퍼 (라이브 라운드 티켓: event_id=NULL) */
 async function insertTestTicket(opts: {
   userId: number;
   roundId: number;
-  eventId: number;
   sessionDbId: number;
   seatLabel?: string;
   rank?: number;
@@ -46,7 +45,6 @@ async function insertTestTicket(opts: {
   const {
     userId,
     roundId,
-    eventId,
     sessionDbId,
     seatLabel = "A-1-1",
     rank = 1,
@@ -59,9 +57,9 @@ async function insertTestTicket(opts: {
     `INSERT INTO tickets
        (live_session_id, user_id, round_id, event_id, passenger_nickname,
         serial, seat_label, elapsed_ms, rank, total_participants)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0)
+     VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, 0)
      RETURNING id`,
-    [sessionDbId, userId, roundId, eventId, "test_nick", serial, seatLabel, elapsedMs, rank],
+    [sessionDbId, userId, roundId, "test_nick", serial, seatLabel, elapsedMs, rank],
   );
   const ticketId: number = insRes.rows[0].id;
 
@@ -87,7 +85,7 @@ describe("Tickets API", () => {
     });
 
     it("[1-2] 본인 티켓 목록 + 페이지네이션 필드 확인", async () => {
-      const { roundId, eventId } = await createTestRound({ status: "open" });
+      const { roundId } = await createTestRound({ status: "open" });
       createdRoundIds.push(roundId);
 
       const { userId, email, password } = await createTestUser();
@@ -97,7 +95,7 @@ describe("Tickets API", () => {
       // 같은 userId로 두 개의 completed 세션 삽입
       // partial unique index (round_id, user_id) WHERE status IN (queued/active/completed)
       // → completed 도 인덱스 대상이므로 별도 라운드에 삽입
-      const { roundId: roundId2, eventId: eventId2 } = await createTestRound({ status: "open" });
+      const { roundId: roundId2 } = await createTestRound({ status: "open" });
       createdRoundIds.push(roundId2);
 
       const { sessionDbId: sid1 } = await insertTestSession({
@@ -117,8 +115,8 @@ describe("Tickets API", () => {
         elapsedMs: 4000,
       });
 
-      await insertTestTicket({ userId, roundId, eventId, sessionDbId: sid1, seatLabel: "A-1-1", rank: 1 });
-      await insertTestTicket({ userId, roundId: roundId2, eventId: eventId2, sessionDbId: sid2, seatLabel: "A-1-2", rank: 1 });
+      await insertTestTicket({ userId, roundId, sessionDbId: sid1, seatLabel: "A-1-1", rank: 1 });
+      await insertTestTicket({ userId, roundId: roundId2, sessionDbId: sid2, seatLabel: "A-1-2", rank: 1 });
 
       const res = await agent.get("/api/tickets/me?page=1&limit=10");
 
@@ -145,7 +143,7 @@ describe("Tickets API", () => {
 
   describe("[2] GET /api/tickets/:ticketId", () => {
     it("[2-1] 본인 티켓 상세 반환", async () => {
-      const { roundId, eventId } = await createTestRound({ status: "open" });
+      const { roundId } = await createTestRound({ status: "open" });
       createdRoundIds.push(roundId);
 
       const { userId, email, password } = await createTestUser();
@@ -159,7 +157,7 @@ describe("Tickets API", () => {
         seatLabel: "A-1-1",
         elapsedMs: 5000,
       });
-      const ticketId = await insertTestTicket({ userId, roundId, eventId, sessionDbId, seatLabel: "A-1-1" });
+      const ticketId = await insertTestTicket({ userId, roundId, sessionDbId, seatLabel: "A-1-1" });
 
       const res = await agent.get(`/api/tickets/${ticketId}`);
 
@@ -177,7 +175,7 @@ describe("Tickets API", () => {
     });
 
     it("[2-2] 다른 사용자 티켓 조회 → 403 TICKET_FORBIDDEN", async () => {
-      const { roundId, eventId } = await createTestRound({ status: "open" });
+      const { roundId } = await createTestRound({ status: "open" });
       createdRoundIds.push(roundId);
 
       // 소유자
@@ -193,7 +191,6 @@ describe("Tickets API", () => {
       const ticketId = await insertTestTicket({
         userId: ownerUserId,
         roundId,
-        eventId,
         sessionDbId,
       });
 

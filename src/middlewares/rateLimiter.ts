@@ -94,6 +94,60 @@ export const ticketsLimiter = rateLimit({
   ),
 });
 
+// 이벤트 공개 조회 API 전용. `/api/events`, `/calendar`, `/nearest`, `/:eventId` 는
+// 인증 여부와 관계없이 대량 폴링·봇 열람 대상이 되기 쉬움. globalLimiter(1분 100회) 위에
+// 얹어 IP 기반으로 더 좁게 제한한다. liveLimiter 와 같은 정책(60/min).
+export const eventsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInTest,
+  handler: envelopeHandler(
+    "TOO_MANY_EVENT_REQUESTS",
+    "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
+  ),
+});
+
+// 이벤트 신청·취소·세션 시작 API 전용. 포인트 차감·티켓팅 세션 생성 등 상태 변경을
+// 동반하므로 봇의 자동화 공격(예: 오픈 직전 다중 계정 사전 신청, 세션 재시작 남용)에
+// 대비해 엄격하게 제한한다. authMiddleware 뒤에 배치해 인증된 유저 id 로 카운트하고
+// 같은 IP(NAT/사내망) 상 다른 유저에게 영향이 없도록 한다.
+export const eventActionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInTest,
+  keyGenerator: (req: Request, res: Response) =>
+    req.user?.id
+      ? `event-action:${req.user.id}`
+      : ipKeyGenerator(req.ip ?? "unknown"),
+  handler: envelopeHandler(
+    "TOO_MANY_EVENT_ACTIONS",
+    "이벤트 신청 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
+  ),
+});
+
+// 이벤트 티켓팅 세션 후속 호출(queue/seats/hold/confirm) 전용. 좌석맵 폴링·좌석 잡기
+// 시도가 반복될 수 있어 완만하게, 그러나 인증 유저 기준 상한을 둔다. authMiddleware
+// 뒤 배치. liveLimiter(60/min) 와 유사하게 60/min 을 유저 단위로 부여.
+export const eventSessionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInTest,
+  keyGenerator: (req: Request, res: Response) =>
+    req.user?.id
+      ? `event-session:${req.user.id}`
+      : ipKeyGenerator(req.ip ?? "unknown"),
+  handler: envelopeHandler(
+    "TOO_MANY_EVENT_SESSION_REQUESTS",
+    "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
+  ),
+});
+
 // 관리자 라우트 전용. requireAdmin 이 매 요청마다 users.role DB 조회를 하므로
 // 토큰 탈취/오작동 클라이언트가 대량 폴링 시 DB 커넥션 풀이 소진될 수 있음.
 // authMiddleware 뒤에 배치해 인증된 요청 기준으로 카운트하고, 인증된 유저 id 를

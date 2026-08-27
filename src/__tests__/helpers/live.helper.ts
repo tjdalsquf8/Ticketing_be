@@ -13,7 +13,7 @@ import bcrypt from "bcrypt";
 // ─── 상수 ────────────────────────────────────────────────────────────────────
 
 export const TEST_LIVE_EMAIL_PREFIX = "__test_live_";
-const DEFAULT_EVENT_ID = 1005; // live_config.default_event_id
+const DEFAULT_VENUE_ID = 1;   // kspo-dome-v1 (seed venue)
 const TEST_SEAT_LABELS = ["A-1-1", "A-1-2", "A-1-3", "A-1-4", "A-1-5"];
 
 // ─── 사용자 헬퍼 ─────────────────────────────────────────────────────────────
@@ -66,12 +66,10 @@ export interface TestRoundOptions {
   /** closes_at offset in seconds from NOW (기본 +300: 5분 후 종료) */
   closesOffsetSeconds?: number;
   seatLabels?: string[];
-  eventId?: number;
 }
 
 export interface TestRound {
   roundId: number;
-  eventId: number;
   seatLabels: string[];
 }
 
@@ -87,20 +85,19 @@ export async function createTestRound(
     opensOffsetSeconds = -60,
     closesOffsetSeconds = 300,
     seatLabels = TEST_SEAT_LABELS,
-    eventId = DEFAULT_EVENT_ID,
   } = opts;
 
   const res = await pool.query(
-    `INSERT INTO live_rounds (opens_at, closes_at, event_id, seat_labels, status)
+    `INSERT INTO live_rounds (opens_at, closes_at, seat_labels, status, venue_id)
      VALUES (
        NOW() + make_interval(secs => $1),
        NOW() + make_interval(secs => $2),
-       $3,
-       $4::jsonb,
+       $3::jsonb,
+       $4,
        $5
      )
      RETURNING id`,
-    [opensOffsetSeconds, closesOffsetSeconds, eventId, JSON.stringify(seatLabels), status],
+    [opensOffsetSeconds, closesOffsetSeconds, JSON.stringify(seatLabels), status, DEFAULT_VENUE_ID],
   );
 
   const roundId: number = res.rows[0].id;
@@ -115,7 +112,7 @@ export async function createTestRound(
     }
   }
 
-  return { roundId, eventId, seatLabels };
+  return { roundId, seatLabels };
 }
 
 /** 라운드와 관련 데이터 모두 삭제 (CASCADE 활용) */

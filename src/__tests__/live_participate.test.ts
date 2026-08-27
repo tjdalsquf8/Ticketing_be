@@ -383,7 +383,7 @@ describe("Live Participate API", () => {
       expect(dbSeat.rows[0].status).toBe("held");
     });
 
-    it("[4-2] 이미 held 좌석 재시도 → 409 SEAT_UNAVAILABLE", async () => {
+    it("[4-2] 이미 held 좌석 재시도 → 409 SEAT_ALREADY_HELD", async () => {
       const { roundId, seatLabels } = await createTestRound({ status: "open" });
       createdRoundIds.push(roundId);
 
@@ -417,7 +417,7 @@ describe("Live Participate API", () => {
         .send({ seatLabel: seatLabels[0] });
 
       expect(res.status).toBe(409);
-      expect(res.body.error.code).toBe("SEAT_UNAVAILABLE");
+      expect(res.body.error.code).toBe("SEAT_ALREADY_HELD");
     });
 
     it("[4-3] 본인이 다른 좌석 hold → 기존 hold 자동 해제 후 새 좌석 hold", async () => {

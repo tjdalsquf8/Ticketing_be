@@ -15,8 +15,8 @@ export interface TicketSummary {
   rankNumber: number;
   elapsedMs: number;
   issuedAt: string;
-  roundId: number;
-  eventId: number;
+  roundId: number | null;
+  eventId: number | null;
 }
 
 export interface GetMyTicketsResult {
@@ -38,8 +38,8 @@ export interface TicketDetail {
   rankNumber: number;
   elapsedMs: number;
   issuedAt: string;
-  roundId: number;
-  eventId: number;
+  roundId: number | null;
+  eventId: number | null;
   totalParticipants: number;
   rankPercentile: number | null;
 }
