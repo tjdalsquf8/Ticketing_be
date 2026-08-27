@@ -117,6 +117,15 @@ const postCreateSession = async (
     const userId = req.user?.id ?? null;
     const guestUuid = userId == null ? resolveGuestUuid(req) : undefined;
 
+    // 만료 토큰으로 접근한 로그인 유저를 게스트로 저장하면 이후 티켓 발급 판정
+    // (session.user_id 기준) 이 영구히 skip 된다. 데이터 오염 원천 차단 위해 401 로 거절.
+    // 프론트는 401 AUTH_INVALID_TOKEN 로 refresh 후 재시도.
+    if (userId == null && req.authExpired) {
+      return next(
+        new AppError(401, "AUTH_INVALID_TOKEN", "인증 토큰이 만료되었습니다. 다시 시도해주세요."),
+      );
+    }
+
     if (userId == null && !guestUuid) {
       return next(
         new AppError(400, "GUEST_UUID_REQUIRED", "게스트 UUID가 필요합니다. guest_uuid 쿠키를 전달해주세요."),
