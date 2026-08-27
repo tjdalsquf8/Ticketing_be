@@ -1,5 +1,6 @@
 import request from "supertest";
 import app from "../app";
+import pool from "../config/db";
 import { cleanupTestPracticeSessions, cleanupTestGuests, uniqueNickname } from "./setup";
 
 describe("Guests API", () => {
@@ -133,43 +134,79 @@ describe("Guests API", () => {
   });
 
   describe("[8] DELETE /api/guests/me", () => {
-    it("쿠키 삭제 응답 후 다음 요청에서 GET /me는 404, 새 세션은 새 UUID 발급", async () => {
+    it("[8-1] POST /api/guests 발급 직후 삭제 시도 → 429 NICKNAME_CHANGE_TOO_SOON", async () => {
+      const agent = request.agent(app);
+      const nickname = uniqueNickname();
+
+      // 명시적 게스트 발급 → guests 테이블 INSERT + nickname_changed_at = NOW()
+      await agent
+        .post("/api/guests")
+        .set("Content-Type", "application/json")
+        .send({ nickname });
+
+      // 방금 발급 → 아직 1시간 안 지남
+      const delRes = await agent.delete("/api/guests/me");
+      expect(delRes.status).toBe(429);
+      expect(delRes.body.error.code).toBe("NICKNAME_CHANGE_TOO_SOON");
+      expect(delRes.headers["retry-after"]).toBeDefined();
+
+      // 쿠키 유지 확인
+      const meRes = await agent.get("/api/guests/me");
+      expect(meRes.status).toBe(200);
+    });
+
+    it("[8-2] 1시간 지난 게스트는 삭제 성공 → 새 세션은 새 UUID", async () => {
       const agent = request.agent(app);
       const nickname1 = uniqueNickname();
       const nickname2 = uniqueNickname();
 
-      // 1. 첫 세션 → 쿠키 발급
-      await agent
-        .post("/api/practice/sessions")
+      const first = await agent
+        .post("/api/guests")
         .set("Content-Type", "application/json")
-        .send({ mode: "practice", nickname: nickname1 });
+        .send({ nickname: nickname1 });
+      const uuidBefore = first.body.data.guestUuid;
 
-      const before = await agent.get("/api/guests/me");
-      expect(before.status).toBe(200);
-      const uuidBefore = before.body.data.guestUuid;
+      // 테스트 목적으로 nickname_changed_at 을 1시간 하고도 1분 전으로 조작
+      await pool.query(
+        `UPDATE guests SET nickname_changed_at = NOW() - INTERVAL '61 minutes'
+         WHERE guest_uuid = $1`,
+        [uuidBefore],
+      );
 
-      // 2. DELETE /me → 쿠키 clear
       const delRes = await agent.delete("/api/guests/me");
       expect(delRes.status).toBe(200);
-      expect(delRes.body.success).toBe(true);
 
-      // 3. GET /me → 401 (쿠키 없음)
+      // 쿠키 clear 확인
       const afterDelete = await agent.get("/api/guests/me");
       expect(afterDelete.status).toBe(401);
 
-      // 4. 새 세션 시작 → 새 UUID 발급됨
+      // 새 발급 → 새 UUID
+      const second = await agent
+        .post("/api/guests")
+        .set("Content-Type", "application/json")
+        .send({ nickname: nickname2 });
+      expect(second.body.data.guestUuid).not.toBe(uuidBefore);
+      expect(second.body.data.nickname).toBe(nickname2);
+    });
+
+    it("[8-3] 쿠키 없는 상태에서 삭제 요청 → 200 (idempotent)", async () => {
+      const res = await request(app).delete("/api/guests/me");
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+    });
+
+    it("[8-4] guests 테이블에 row 없는 유령 쿠키 → 200 (idempotent)", async () => {
+      // guests 미접점(practice 만 참여) 사용자는 nickname_changed_at 검사 대상 아님.
+      const agent = request.agent(app);
+      const nickname = uniqueNickname();
+
       await agent
         .post("/api/practice/sessions")
         .set("Content-Type", "application/json")
-        .send({ mode: "practice", nickname: nickname2 });
+        .send({ mode: "practice", nickname });
 
-      const after = await agent.get("/api/guests/me");
-      expect(after.status).toBe(200);
-      const uuidAfter = after.body.data.guestUuid;
-
-      // 완전히 다른 UUID + 다른 nickname
-      expect(uuidAfter).not.toBe(uuidBefore);
-      expect(after.body.data.nickname).toBe(nickname2);
+      const res = await agent.delete("/api/guests/me");
+      expect(res.status).toBe(200);
     });
   });
 });
