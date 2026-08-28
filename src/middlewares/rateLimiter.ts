@@ -169,3 +169,22 @@ export const adminLimiter = rateLimit({
     "관리자 API 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
   ),
 });
+
+// 기프티콘 상세 조회(GET /admin/gifticons/:id) 전용. 원본 바코드(=환금성 자산)가
+// 노출되는 유일한 경로라 adminLimiter(200/min)보다 훨씬 좁게 제한해 대량 열람으로
+// 인한 코드 유출 시도를 막는다. loginLimiter 수준으로 보수적으로 설정.
+export const gifticonDetailLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInTest,
+  keyGenerator: (req: Request, res: Response) =>
+    req.user?.id
+      ? `gifticon-detail:${req.user.id}`
+      : ipKeyGenerator(req.ip ?? "unknown"),
+  handler: envelopeHandler(
+    "TOO_MANY_GIFTICON_DETAIL_REQUESTS",
+    "기프티콘 상세 조회 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
+  ),
+});

@@ -1,9 +1,10 @@
 import { Router } from "express";
 import authMiddleware from "../middlewares/authMiddleware";
 import requireAdmin from "../middlewares/requireAdmin";
-import { adminLimiter } from "../middlewares/rateLimiter";
+import { adminLimiter, gifticonDetailLimiter } from "../middlewares/rateLimiter";
 import * as adminController from "../controllers/admin.controller";
 import * as adminEventsController from "../controllers/admin.events.controller";
+import * as gifticonsController from "../controllers/gifticons.controller";
 import {
   putConfigVenueValidator,
   putConfigScheduleValidator,
@@ -11,6 +12,12 @@ import {
   roundIdParamValidator,
   runCronValidator,
 } from "../middlewares/validators/admin.validator";
+import {
+  gifticonIdParamValidator,
+  listGifticonsQueryValidator,
+  createGifticonBodyValidator,
+  updateGifticonBodyValidator,
+} from "../middlewares/validators/gifticons.validator";
 import {
   eventIdParamValidator,
   seriesIdParamValidator,
@@ -138,6 +145,44 @@ router.post(
   seriesIdParamValidator,
   cancelSeriesBodyValidator,
   adminEventsController.cancelSeries,
+);
+
+// ─── 기프티콘 재고 관리 ──────────────────────────────────────────────────────
+
+// GET /api/admin/gifticons/summary — :id 라우트보다 먼저 선언해야 "summary"가 id로 매칭되지 않음
+router.get("/gifticons/summary", gifticonsController.getSummary);
+
+router.get(
+  "/gifticons",
+  listGifticonsQueryValidator,
+  gifticonsController.listGifticons,
+);
+
+// 원본 바코드가 노출되는 유일한 경로 — adminLimiter 위에 전용 제한 추가
+router.get(
+  "/gifticons/:id",
+  gifticonDetailLimiter,
+  gifticonIdParamValidator,
+  gifticonsController.getGifticonDetail,
+);
+
+router.post(
+  "/gifticons",
+  createGifticonBodyValidator,
+  gifticonsController.createGifticon,
+);
+
+router.patch(
+  "/gifticons/:id",
+  gifticonIdParamValidator,
+  updateGifticonBodyValidator,
+  gifticonsController.updateGifticon,
+);
+
+router.delete(
+  "/gifticons/:id",
+  gifticonIdParamValidator,
+  gifticonsController.deleteGifticon,
 );
 
 export default router;
