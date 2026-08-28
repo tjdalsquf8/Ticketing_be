@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict zj8FUxg7nobOO8oPjMonoaRT3Y8sKjvtajCWxrVKpYjteUQfmNBx5eHqbnNcaKm
+\restrict M1bai4BeGqghLeDRkpUmbGza31uQSnahIMKHPw7hEI0ivZ2BqQmkOxFUps8qiKQ
 
 -- Dumped from database version 16.13 (Postgres.app)
 -- Dumped by pg_dump version 18.4
@@ -562,7 +562,7 @@ CREATE TABLE public.users (
     password character varying(255) NOT NULL,
     name character varying(100) NOT NULL,
     created_at timestamp without time zone DEFAULT now(),
-    refresh_token character varying(500),
+    refresh_token_hash character(64),
     role character varying(16) DEFAULT 'user'::character varying NOT NULL,
     points integer DEFAULT 0 NOT NULL,
     CONSTRAINT users_points_check CHECK ((points >= 0)),
@@ -1443,5 +1443,5 @@ ALTER TABLE ONLY public.tickets
 -- PostgreSQL database dump complete
 --
 
-\unrestrict zj8FUxg7nobOO8oPjMonoaRT3Y8sKjvtajCWxrVKpYjteUQfmNBx5eHqbnNcaKm
+\unrestrict M1bai4BeGqghLeDRkpUmbGza31uQSnahIMKHPw7hEI0ivZ2BqQmkOxFUps8qiKQ
 

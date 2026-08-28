@@ -47,16 +47,26 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
 };
 
 const refresh = async (req: Request, res: Response) => {
-  const refreshToken = req.cookies.refreshToken;
-  if (!refreshToken) {
+  const oldRefreshToken = req.cookies.refreshToken;
+  if (!oldRefreshToken) {
     throw new AppError(401, "AUTH_INVALID_TOKEN", "refreshToken이 없습니다.");
   }
-  const { accessToken } = await authService.refresh(refreshToken);
+  const { accessToken, refreshToken } = await authService.refresh(
+    oldRefreshToken,
+  );
   res.cookie("accessToken", accessToken, {
     httpOnly: true,
     secure: config.nodeEnv === "production",
     sameSite: "strict",
     maxAge: 60 * 60 * 1000,
+    path: "/",
+  });
+  // refresh 도 매 호출마다 새 값으로 교체 (rotation). 이전 refresh 는 서버 hash 교체로 자동 무효.
+  res.cookie("refreshToken", refreshToken, {
+    httpOnly: true,
+    secure: config.nodeEnv === "production",
+    sameSite: "strict",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
     path: "/",
   });
   res.status(200).json({ success: true, data: null });

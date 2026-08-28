@@ -147,7 +147,7 @@ describe("Auth API", () => {
   });
 
   describe("[3] POST /api/auth/refresh", () => {
-    it("유효한 refreshToken 쿠키로 200 + 새 accessToken 쿠키 발급", async () => {
+    it("유효한 refreshToken 쿠키로 200 + access·refresh 쿠키 모두 재발급 (rotation)", async () => {
       const email = uniqueEmail();
       const agent = request.agent(app);
       await request(app)
@@ -165,6 +165,37 @@ describe("Auth API", () => {
       expect(res.body.data).toBeNull();
       const setCookie = res.headers["set-cookie"] as unknown as string[];
       expect(setCookie.find((c) => c.startsWith("accessToken="))).toBeDefined();
+      expect(setCookie.find((c) => c.startsWith("refreshToken="))).toBeDefined();
+    });
+
+    it("로테이션 후 이전 refresh 토큰은 401 (재사용 감지)", async () => {
+      const email = uniqueEmail();
+      const agent = request.agent(app);
+      await request(app)
+        .post("/api/auth/register")
+        .set("Content-Type", "application/json")
+        .send({ email, password: VALID_PASSWORD, name: uniqueUserName() });
+      const loginRes = await agent
+        .post("/api/auth/login")
+        .set("Content-Type", "application/json")
+        .send({ email, password: VALID_PASSWORD });
+
+      const loginCookies = loginRes.headers["set-cookie"] as unknown as string[];
+      const oldRefreshCookie = loginCookies.find((c) =>
+        c.startsWith("refreshToken="),
+      );
+      const oldRefreshValue = oldRefreshCookie!.split(";")[0].split("=")[1];
+
+      // agent 로 한 번 refresh → 이 세션 refresh 쿠키 갱신됨
+      const rotated = await agent.post("/api/auth/refresh");
+      expect(rotated.status).toBe(200);
+
+      // 별도 요청에서 이전 refresh 값 그대로 사용 → hash 미스로 401
+      const replay = await request(app)
+        .post("/api/auth/refresh")
+        .set("Cookie", `refreshToken=${oldRefreshValue}`);
+      expect(replay.status).toBe(401);
+      expect(replay.body.error.code).toBe("AUTH_INVALID_TOKEN");
     });
 
     it("refreshToken 쿠키 없이 호출 시 401 AUTH_INVALID_TOKEN", async () => {
