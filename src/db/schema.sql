@@ -166,6 +166,78 @@ ALTER SEQUENCE public.events_id_seq OWNED BY public.events.id;
 
 
 --
+-- Name: gifticon_view_logs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.gifticon_view_logs (
+    id integer NOT NULL,
+    gifticon_id integer,
+    viewed_by integer NOT NULL,
+    viewed_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: gifticon_view_logs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.gifticon_view_logs_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: gifticon_view_logs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.gifticon_view_logs_id_seq OWNED BY public.gifticon_view_logs.id;
+
+
+--
+-- Name: gifticons; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.gifticons (
+    id integer NOT NULL,
+    category character varying(20) NOT NULL,
+    product_name character varying(80) NOT NULL,
+    face_value integer NOT NULL,
+    code character varying(64) NOT NULL,
+    status character varying(16) DEFAULT 'available'::character varying NOT NULL,
+    created_by integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT gifticons_category_check CHECK (((category)::text = ANY ((ARRAY['coffee'::character varying, 'food'::character varying, 'convenience'::character varying, 'beauty'::character varying, 'etc'::character varying])::text[]))),
+    CONSTRAINT gifticons_face_value_check CHECK ((face_value > 0)),
+    CONSTRAINT gifticons_status_check CHECK (((status)::text = ANY ((ARRAY['available'::character varying, 'issued'::character varying, 'redeemed'::character varying, 'expired'::character varying])::text[])))
+);
+
+
+--
+-- Name: gifticons_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.gifticons_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: gifticons_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.gifticons_id_seq OWNED BY public.gifticons.id;
+
+
+--
 -- Name: guests; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -577,6 +649,20 @@ ALTER TABLE ONLY public.events ALTER COLUMN id SET DEFAULT nextval('public.event
 
 
 --
+-- Name: gifticon_view_logs id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticon_view_logs ALTER COLUMN id SET DEFAULT nextval('public.gifticon_view_logs_id_seq'::regclass);
+
+
+--
+-- Name: gifticons id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticons ALTER COLUMN id SET DEFAULT nextval('public.gifticons_id_seq'::regclass);
+
+
+--
 -- Name: guests id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -668,6 +754,30 @@ ALTER TABLE ONLY public.event_series
 
 ALTER TABLE ONLY public.events
     ADD CONSTRAINT events_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: gifticon_view_logs gifticon_view_logs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticon_view_logs
+    ADD CONSTRAINT gifticon_view_logs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: gifticons gifticons_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticons
+    ADD CONSTRAINT gifticons_code_key UNIQUE (code);
+
+
+--
+-- Name: gifticons gifticons_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticons
+    ADD CONSTRAINT gifticons_pkey PRIMARY KEY (id);
 
 
 --
@@ -939,6 +1049,27 @@ CREATE INDEX idx_events_venue_id ON public.events USING btree (venue_id);
 
 
 --
+-- Name: idx_gifticon_view_logs_gifticon_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_gifticon_view_logs_gifticon_id ON public.gifticon_view_logs USING btree (gifticon_id);
+
+
+--
+-- Name: idx_gifticons_category; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_gifticons_category ON public.gifticons USING btree (category);
+
+
+--
+-- Name: idx_gifticons_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_gifticons_status ON public.gifticons USING btree (status);
+
+
+--
 -- Name: idx_guests_guest_uuid; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1154,6 +1285,30 @@ ALTER TABLE ONLY public.events
 
 ALTER TABLE ONLY public.events
     ADD CONSTRAINT events_venue_id_fkey FOREIGN KEY (venue_id) REFERENCES public.venues(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: gifticon_view_logs gifticon_view_logs_gifticon_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticon_view_logs
+    ADD CONSTRAINT gifticon_view_logs_gifticon_id_fkey FOREIGN KEY (gifticon_id) REFERENCES public.gifticons(id) ON DELETE SET NULL;
+
+
+--
+-- Name: gifticon_view_logs gifticon_view_logs_viewed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticon_view_logs
+    ADD CONSTRAINT gifticon_view_logs_viewed_by_fkey FOREIGN KEY (viewed_by) REFERENCES public.users(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: gifticons gifticons_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticons
+    ADD CONSTRAINT gifticons_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE RESTRICT;
 
 
 --
