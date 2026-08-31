@@ -166,6 +166,38 @@ ALTER SEQUENCE public.events_id_seq OWNED BY public.events.id;
 
 
 --
+-- Name: gifticon_settlements; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.gifticon_settlements (
+    id integer NOT NULL,
+    ticket_id integer NOT NULL,
+    gifticon_id integer NOT NULL,
+    issued_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: gifticon_settlements_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.gifticon_settlements_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: gifticon_settlements_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.gifticon_settlements_id_seq OWNED BY public.gifticon_settlements.id;
+
+
+--
 -- Name: gifticon_view_logs; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -649,6 +681,13 @@ ALTER TABLE ONLY public.events ALTER COLUMN id SET DEFAULT nextval('public.event
 
 
 --
+-- Name: gifticon_settlements id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticon_settlements ALTER COLUMN id SET DEFAULT nextval('public.gifticon_settlements_id_seq'::regclass);
+
+
+--
 -- Name: gifticon_view_logs id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -754,6 +793,30 @@ ALTER TABLE ONLY public.event_series
 
 ALTER TABLE ONLY public.events
     ADD CONSTRAINT events_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: gifticon_settlements gifticon_settlements_gifticon_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticon_settlements
+    ADD CONSTRAINT gifticon_settlements_gifticon_id_key UNIQUE (gifticon_id);
+
+
+--
+-- Name: gifticon_settlements gifticon_settlements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticon_settlements
+    ADD CONSTRAINT gifticon_settlements_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: gifticon_settlements gifticon_settlements_ticket_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticon_settlements
+    ADD CONSTRAINT gifticon_settlements_ticket_id_key UNIQUE (ticket_id);
 
 
 --
@@ -1269,6 +1332,22 @@ ALTER TABLE ONLY public.event_series
 
 ALTER TABLE ONLY public.events
     ADD CONSTRAINT events_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: gifticon_settlements gifticon_settlements_gifticon_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticon_settlements
+    ADD CONSTRAINT gifticon_settlements_gifticon_id_fkey FOREIGN KEY (gifticon_id) REFERENCES public.gifticons(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: gifticon_settlements gifticon_settlements_ticket_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticon_settlements
+    ADD CONSTRAINT gifticon_settlements_ticket_id_fkey FOREIGN KEY (ticket_id) REFERENCES public.tickets(id) ON DELETE CASCADE;
 
 
 --

@@ -5,6 +5,7 @@ import { adminLimiter, gifticonDetailLimiter } from "../middlewares/rateLimiter"
 import * as adminController from "../controllers/admin.controller";
 import * as adminEventsController from "../controllers/admin.events.controller";
 import * as gifticonsController from "../controllers/gifticons.controller";
+import * as settlementsController from "../controllers/settlements.controller";
 import {
   putConfigVenueValidator,
   putConfigScheduleValidator,
@@ -18,6 +19,11 @@ import {
   createGifticonBodyValidator,
   updateGifticonBodyValidator,
 } from "../middlewares/validators/gifticons.validator";
+import {
+  settlementIdParamValidator,
+  listSettlementsQueryValidator,
+  issueSettlementBodyValidator,
+} from "../middlewares/validators/settlements.validator";
 import {
   eventIdParamValidator,
   seriesIdParamValidator,
@@ -183,6 +189,21 @@ router.delete(
   "/gifticons/:id",
   gifticonIdParamValidator,
   gifticonsController.deleteGifticon,
+);
+
+// ─── 정산 이력(기프티콘) ─────────────────────────────────────────────────────
+
+router.get(
+  "/settlements/gifticons",
+  listSettlementsQueryValidator,
+  settlementsController.listSettlements,
+);
+
+router.post(
+  "/settlements/gifticons/:id/issue",
+  settlementIdParamValidator,
+  issueSettlementBodyValidator,
+  settlementsController.issueSettlement,
 );
 
 export default router;

@@ -3,8 +3,9 @@ import { query } from "express-validator";
 const getRankingsValidator = [
   query("mode")
     .notEmpty().withMessage("mode는 필수입니다.")
-    .isIn(["practice", "live"]).withMessage("mode는 practice 또는 live여야 합니다."),
+    .isIn(["practice", "live", "ticket"]).withMessage("mode는 practice, live, ticket 중 하나여야 합니다."),
   query("period")
+    .if((_, { req }) => req.query!.mode !== "ticket")
     .notEmpty().withMessage("period는 필수입니다.")
     .isIn(["daily", "weekly", "monthly"]).withMessage("period는 daily, weekly, monthly 중 하나여야 합니다."),
   query("page")

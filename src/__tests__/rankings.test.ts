@@ -1,6 +1,31 @@
+import crypto from "crypto";
 import request from "supertest";
 import app from "../app";
+import pool from "../config/db";
 import { cleanupTestPracticeSessions, uniqueNickname } from "./setup";
+import {
+  createTestUser,
+  createTestRound,
+  insertTestSession,
+  cleanupTestRounds,
+  cleanupTestLiveUsers,
+} from "./helpers/live.helper";
+
+async function insertTicket(
+  userId: number,
+  roundId: number,
+  sessionDbId: number,
+  rank: number,
+): Promise<void> {
+  const serial = crypto.randomUUID().replace(/-/g, "").substring(0, 12).toUpperCase();
+  await pool.query(
+    `INSERT INTO tickets
+       (live_session_id, user_id, round_id, event_id, passenger_nickname,
+        serial, seat_label, elapsed_ms, rank, total_participants)
+     VALUES ($1, $2, $3, NULL, 'test_nick', $4, 'A-1-1', 5000, $5, 0)`,
+    [sessionDbId, userId, roundId, serial, rank],
+  );
+}
 
 describe("Rankings API", () => {
   beforeAll(cleanupTestPracticeSessions);
@@ -45,6 +70,63 @@ describe("Rankings API", () => {
       expect(matches.length).toBe(1);
       // 게스트 세션이므로 is_verified = false
       expect(matches[0].is_verified).toBe(false);
+    });
+  });
+
+  describe("[7] 티켓 누적 랭킹 (mode=ticket)", () => {
+    const createdRoundIds: number[] = [];
+
+    afterAll(async () => {
+      await cleanupTestLiveUsers();
+      await cleanupTestRounds(createdRoundIds);
+    });
+
+    it("사용자별 누적 티켓 수 내림차순으로 랭킹을 반환한다", async () => {
+      const userA = await createTestUser();
+      const userB = await createTestUser();
+      const round1 = await createTestRound();
+      const round2 = await createTestRound();
+      createdRoundIds.push(round1.roundId, round2.roundId);
+
+      const sessionA1 = await insertTestSession({
+        roundId: round1.roundId,
+        userId: userA.userId,
+        status: "completed",
+      });
+      const sessionA2 = await insertTestSession({
+        roundId: round2.roundId,
+        userId: userA.userId,
+        status: "completed",
+      });
+      const sessionB1 = await insertTestSession({
+        roundId: round1.roundId,
+        userId: userB.userId,
+        status: "completed",
+      });
+
+      await insertTicket(userA.userId, round1.roundId, sessionA1.sessionDbId, 1);
+      await insertTicket(userA.userId, round2.roundId, sessionA2.sessionDbId, 1);
+      await insertTicket(userB.userId, round1.roundId, sessionB1.sessionDbId, 2);
+
+      const res = await request(app).get(
+        "/api/rankings?mode=ticket&page=1&size=100",
+      );
+      expect(res.status).toBe(200);
+
+      const rowA = res.body.data.find(
+        (r: { userId: number }) => r.userId === userA.userId,
+      );
+      const rowB = res.body.data.find(
+        (r: { userId: number }) => r.userId === userB.userId,
+      );
+      expect(Number(rowA.ticketCount)).toBe(2);
+      expect(Number(rowB.ticketCount)).toBe(1);
+      expect(Number(rowA.rank)).toBeLessThan(Number(rowB.rank));
+    });
+
+    it("period 없이 요청해도 400이 아니다", async () => {
+      const res = await request(app).get("/api/rankings?mode=ticket");
+      expect(res.status).toBe(200);
     });
   });
 });
