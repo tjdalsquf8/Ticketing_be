@@ -1,10 +1,10 @@
 import { Router } from "express";
 import * as timeController from "../controllers/time.controller";
-import { liveLimiter } from "../middlewares/rateLimiter";
+import { timeLimiter } from "../middlewares/rateLimiter";
 
 const router = Router();
 
-router.use(liveLimiter);
+router.use(timeLimiter);
 
 router.get("/", timeController.getTime);
 

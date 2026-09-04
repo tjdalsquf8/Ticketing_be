@@ -27,6 +27,22 @@ async function insertTicket(
   );
 }
 
+/** 유료 이벤트 티켓(round_id NULL, event_id 기준) 직접 삽입 */
+async function insertPaidEventTicket(
+  userId: number,
+  sessionDbId: number,
+  rank: number,
+): Promise<void> {
+  const serial = crypto.randomUUID().replace(/-/g, "").substring(0, 12).toUpperCase();
+  await pool.query(
+    `INSERT INTO tickets
+       (live_session_id, user_id, round_id, event_id, passenger_nickname,
+        serial, seat_label, elapsed_ms, rank, total_participants)
+     VALUES ($1, $2, NULL, NULL, 'test_nick', $3, 'A-1-1', 5000, $4, 0)`,
+    [sessionDbId, userId, serial, rank],
+  );
+}
+
 describe("Rankings API", () => {
   beforeAll(cleanupTestPracticeSessions);
   afterAll(cleanupTestPracticeSessions);
@@ -107,6 +123,8 @@ describe("Rankings API", () => {
       await insertTicket(userA.userId, round1.roundId, sessionA1.sessionDbId, 1);
       await insertTicket(userA.userId, round2.roundId, sessionA2.sessionDbId, 1);
       await insertTicket(userB.userId, round1.roundId, sessionB1.sessionDbId, 2);
+      // 유료 이벤트 티켓(round_id NULL)은 누적 랭킹 집계에서 제외되어야 함
+      await insertPaidEventTicket(userA.userId, sessionA1.sessionDbId, 1);
 
       const res = await request(app).get(
         "/api/rankings?mode=ticket&page=1&size=100",

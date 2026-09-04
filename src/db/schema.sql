@@ -2,15 +2,14 @@
 -- PostgreSQL database dump
 --
 
-\restrict M1bai4BeGqghLeDRkpUmbGza31uQSnahIMKHPw7hEI0ivZ2BqQmkOxFUps8qiKQ
+\restrict rGgIy3gVnCInVjc2OvcE7uiXpOSBidgz2DG4rtG2jpx0tpxYtZitVHRPT05qAyQ
 
--- Dumped from database version 16.13 (Postgres.app)
--- Dumped by pg_dump version 18.4
+-- Dumped from database version 16.15
+-- Dumped by pg_dump version 16.15
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
-SET transaction_timeout = 0;
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
@@ -40,7 +39,7 @@ CREATE TABLE public.event_registrations (
     refund_points integer,
     CONSTRAINT event_registrations_points_paid_check CHECK ((points_paid >= 0)),
     CONSTRAINT event_registrations_refund_points_check CHECK ((refund_points >= 0)),
-    CONSTRAINT event_registrations_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'entered'::character varying, 'ticketed'::character varying, 'missed'::character varying, 'no_show'::character varying, 'cancelled'::character varying, 'refunded'::character varying])::text[])))
+    CONSTRAINT event_registrations_status_check CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('entered'::character varying)::text, ('ticketed'::character varying)::text, ('missed'::character varying)::text, ('no_show'::character varying)::text, ('cancelled'::character varying)::text, ('refunded'::character varying)::text])))
 );
 
 
@@ -82,7 +81,7 @@ CREATE TABLE public.event_series (
     created_by integer NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT event_series_category_check CHECK (((category)::text = ANY ((ARRAY['concert'::character varying, 'musical'::character varying, 'sports'::character varying, 'theater'::character varying, 'festival'::character varying])::text[]))),
+    CONSTRAINT event_series_category_check CHECK (((category)::text = ANY (ARRAY[('concert'::character varying)::text, ('musical'::character varying)::text, ('sports'::character varying)::text, ('theater'::character varying)::text, ('festival'::character varying)::text]))),
     CONSTRAINT event_series_entry_fee_points_check CHECK (((entry_fee_points >= 0) AND (entry_fee_points <= 100000)))
 );
 
@@ -135,11 +134,11 @@ CREATE TABLE public.events (
     cancelled_at timestamp with time zone,
     cancel_reason text,
     hidden_at timestamp with time zone,
-    CONSTRAINT events_category_check CHECK (((category)::text = ANY ((ARRAY['concert'::character varying, 'musical'::character varying, 'sports'::character varying, 'theater'::character varying, 'festival'::character varying])::text[]))),
+    CONSTRAINT events_category_check CHECK (((category)::text = ANY (ARRAY[('concert'::character varying)::text, ('musical'::character varying)::text, ('sports'::character varying)::text, ('theater'::character varying)::text, ('festival'::character varying)::text]))),
     CONSTRAINT events_entry_fee_points_check CHECK (((entry_fee_points >= 0) AND (entry_fee_points <= 100000))),
     CONSTRAINT events_opens_closes_check CHECK ((opens_at < closes_at)),
     CONSTRAINT events_registered_count_check CHECK ((registered_count >= 0)),
-    CONSTRAINT events_status_check CHECK (((status)::text = ANY ((ARRAY['scheduled'::character varying, 'open'::character varying, 'closed'::character varying, 'cancelled'::character varying])::text[]))),
+    CONSTRAINT events_status_check CHECK (((status)::text = ANY (ARRAY[('scheduled'::character varying)::text, ('open'::character varying)::text, ('closed'::character varying)::text, ('cancelled'::character varying)::text]))),
     CONSTRAINT events_total_seats_check CHECK ((total_seats > 0)),
     CONSTRAINT events_type_check CHECK (((type)::text = 'paid'::text))
 );
@@ -243,9 +242,9 @@ CREATE TABLE public.gifticons (
     created_by integer NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT gifticons_category_check CHECK (((category)::text = ANY ((ARRAY['coffee'::character varying, 'food'::character varying, 'convenience'::character varying, 'beauty'::character varying, 'etc'::character varying])::text[]))),
+    CONSTRAINT gifticons_category_check CHECK (((category)::text = ANY (ARRAY[('coffee'::character varying)::text, ('food'::character varying)::text, ('convenience'::character varying)::text, ('beauty'::character varying)::text, ('etc'::character varying)::text]))),
     CONSTRAINT gifticons_face_value_check CHECK ((face_value > 0)),
-    CONSTRAINT gifticons_status_check CHECK (((status)::text = ANY ((ARRAY['available'::character varying, 'issued'::character varying, 'redeemed'::character varying, 'expired'::character varying])::text[])))
+    CONSTRAINT gifticons_status_check CHECK (((status)::text = ANY (ARRAY[('available'::character varying)::text, ('issued'::character varying)::text, ('redeemed'::character varying)::text, ('expired'::character varying)::text])))
 );
 
 
@@ -367,7 +366,7 @@ CREATE TABLE public.live_rounds (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     venue_id integer NOT NULL,
     CONSTRAINT live_rounds_check CHECK ((opens_at < closes_at)),
-    CONSTRAINT live_rounds_status_check CHECK (((status)::text = ANY ((ARRAY['scheduled'::character varying, 'open'::character varying, 'closed'::character varying, 'cancelled'::character varying])::text[])))
+    CONSTRAINT live_rounds_status_check CHECK (((status)::text = ANY (ARRAY[('scheduled'::character varying)::text, ('open'::character varying)::text, ('closed'::character varying)::text, ('cancelled'::character varying)::text])))
 );
 
 
@@ -403,7 +402,7 @@ CREATE TABLE public.live_seats (
     sold_session_id character varying(32),
     event_id integer,
     CONSTRAINT live_seats_context_check CHECK (((round_id IS NOT NULL) OR (event_id IS NOT NULL))),
-    CONSTRAINT live_seats_status_check CHECK (((status)::text = ANY ((ARRAY['available'::character varying, 'held'::character varying, 'sold'::character varying])::text[])))
+    CONSTRAINT live_seats_status_check CHECK (((status)::text = ANY (ARRAY[('available'::character varying)::text, ('held'::character varying)::text, ('sold'::character varying)::text])))
 );
 
 
@@ -504,6 +503,43 @@ ALTER SEQUENCE public.live_waiting_id_seq OWNED BY public.live_waiting.id;
 
 
 --
+-- Name: notices; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notices (
+    id integer NOT NULL,
+    kind character varying(16) NOT NULL,
+    title character varying(120) NOT NULL,
+    href character varying(500),
+    created_by integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    content text,
+    CONSTRAINT notices_kind_check CHECK (((kind)::text = ANY ((ARRAY['notice'::character varying, 'update'::character varying, 'fix'::character varying])::text[])))
+);
+
+
+--
+-- Name: notices_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.notices_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: notices_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.notices_id_seq OWNED BY public.notices.id;
+
+
+--
 -- Name: practice_sessions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -519,7 +555,7 @@ CREATE TABLE public.practice_sessions (
     elapsed_ms integer,
     event_id integer,
     ranking_eligible boolean DEFAULT true NOT NULL,
-    CONSTRAINT practice_sessions_mode_check CHECK (((mode)::text = ANY ((ARRAY['practice'::character varying, 'live'::character varying])::text[])))
+    CONSTRAINT practice_sessions_mode_check CHECK (((mode)::text = ANY (ARRAY[('practice'::character varying)::text, ('live'::character varying)::text])))
 );
 
 
@@ -598,7 +634,7 @@ CREATE TABLE public.users (
     role character varying(16) DEFAULT 'user'::character varying NOT NULL,
     points integer DEFAULT 0 NOT NULL,
     CONSTRAINT users_points_check CHECK ((points >= 0)),
-    CONSTRAINT users_role_check CHECK (((role)::text = ANY ((ARRAY['user'::character varying, 'admin'::character varying])::text[])))
+    CONSTRAINT users_role_check CHECK (((role)::text = ANY (ARRAY[('user'::character varying)::text, ('admin'::character varying)::text])))
 );
 
 
@@ -634,7 +670,7 @@ CREATE TABLE public.venues (
     thumbnail_url character varying(500),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     slug character varying(50) NOT NULL,
-    CONSTRAINT venues_layout_check CHECK (((layout)::text = ANY ((ARRAY['arena-ring'::character varying, 'baseball'::character varying, 'stadium-oval'::character varying, 'proscenium'::character varying, 'festival'::character varying, 'auditorium'::character varying])::text[]))),
+    CONSTRAINT venues_layout_check CHECK (((layout)::text = ANY (ARRAY[('arena-ring'::character varying)::text, ('baseball'::character varying)::text, ('stadium-oval'::character varying)::text, ('proscenium'::character varying)::text, ('festival'::character varying)::text, ('auditorium'::character varying)::text]))),
     CONSTRAINT venues_total_seats_check CHECK ((total_seats > 0))
 );
 
@@ -741,6 +777,13 @@ ALTER TABLE ONLY public.live_sessions ALTER COLUMN id SET DEFAULT nextval('publi
 --
 
 ALTER TABLE ONLY public.live_waiting ALTER COLUMN id SET DEFAULT nextval('public.live_waiting_id_seq'::regclass);
+
+
+--
+-- Name: notices id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notices ALTER COLUMN id SET DEFAULT nextval('public.notices_id_seq'::regclass);
 
 
 --
@@ -953,6 +996,14 @@ ALTER TABLE ONLY public.live_waiting
 
 ALTER TABLE ONLY public.live_waiting
     ADD CONSTRAINT live_waiting_round_id_actor_key_key UNIQUE (round_id, actor_key);
+
+
+--
+-- Name: notices notices_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notices
+    ADD CONSTRAINT notices_pkey PRIMARY KEY (id);
 
 
 --
@@ -1203,6 +1254,13 @@ CREATE INDEX idx_live_waiting_round ON public.live_waiting USING btree (round_id
 
 
 --
+-- Name: idx_notices_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_notices_created_at ON public.notices USING btree (created_at DESC);
+
+
+--
 -- Name: idx_tickets_event; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1248,7 +1306,7 @@ CREATE INDEX idx_venues_slug ON public.venues USING btree (slug);
 -- Name: uq_event_reg_user_event_active; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_event_reg_user_event_active ON public.event_registrations USING btree (event_id, user_id) WHERE ((status)::text = ANY ((ARRAY['pending'::character varying, 'entered'::character varying, 'ticketed'::character varying, 'missed'::character varying, 'no_show'::character varying])::text[]));
+CREATE UNIQUE INDEX uq_event_reg_user_event_active ON public.event_registrations USING btree (event_id, user_id) WHERE ((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('entered'::character varying)::text, ('ticketed'::character varying)::text, ('missed'::character varying)::text, ('no_show'::character varying)::text]));
 
 
 --
@@ -1269,14 +1327,21 @@ CREATE UNIQUE INDEX uq_live_seats_event_label ON public.live_seats USING btree (
 -- Name: uq_live_sessions_round_guest_active; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_live_sessions_round_guest_active ON public.live_sessions USING btree (round_id, guest_uuid) WHERE ((guest_uuid IS NOT NULL) AND ((status)::text = ANY ((ARRAY['queued'::character varying, 'active'::character varying, 'completed'::character varying])::text[])));
+CREATE UNIQUE INDEX uq_live_sessions_round_guest_active ON public.live_sessions USING btree (round_id, guest_uuid) WHERE ((guest_uuid IS NOT NULL) AND ((status)::text = ANY (ARRAY[('queued'::character varying)::text, ('active'::character varying)::text, ('completed'::character varying)::text])));
+
+
+--
+-- Name: uq_live_sessions_round_nickname_guest; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_live_sessions_round_nickname_guest ON public.live_sessions USING btree (round_id, nickname) WHERE ((guest_uuid IS NOT NULL) AND ((status)::text = ANY ((ARRAY['queued'::character varying, 'active'::character varying, 'completed'::character varying])::text[])));
 
 
 --
 -- Name: uq_live_sessions_round_user_active; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_live_sessions_round_user_active ON public.live_sessions USING btree (round_id, user_id) WHERE ((user_id IS NOT NULL) AND ((status)::text = ANY ((ARRAY['queued'::character varying, 'active'::character varying, 'completed'::character varying])::text[])));
+CREATE UNIQUE INDEX uq_live_sessions_round_user_active ON public.live_sessions USING btree (round_id, user_id) WHERE ((user_id IS NOT NULL) AND ((status)::text = ANY (ARRAY[('queued'::character varying)::text, ('active'::character varying)::text, ('completed'::character varying)::text])));
 
 
 --
@@ -1335,22 +1400,6 @@ ALTER TABLE ONLY public.events
 
 
 --
--- Name: gifticon_settlements gifticon_settlements_gifticon_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.gifticon_settlements
-    ADD CONSTRAINT gifticon_settlements_gifticon_id_fkey FOREIGN KEY (gifticon_id) REFERENCES public.gifticons(id) ON DELETE RESTRICT;
-
-
---
--- Name: gifticon_settlements gifticon_settlements_ticket_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.gifticon_settlements
-    ADD CONSTRAINT gifticon_settlements_ticket_id_fkey FOREIGN KEY (ticket_id) REFERENCES public.tickets(id) ON DELETE CASCADE;
-
-
---
 -- Name: events events_series_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1364,6 +1413,22 @@ ALTER TABLE ONLY public.events
 
 ALTER TABLE ONLY public.events
     ADD CONSTRAINT events_venue_id_fkey FOREIGN KEY (venue_id) REFERENCES public.venues(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: gifticon_settlements gifticon_settlements_gifticon_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticon_settlements
+    ADD CONSTRAINT gifticon_settlements_gifticon_id_fkey FOREIGN KEY (gifticon_id) REFERENCES public.gifticons(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: gifticon_settlements gifticon_settlements_ticket_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticon_settlements
+    ADD CONSTRAINT gifticon_settlements_ticket_id_fkey FOREIGN KEY (ticket_id) REFERENCES public.tickets(id) ON DELETE CASCADE;
 
 
 --
@@ -1487,6 +1552,14 @@ ALTER TABLE ONLY public.live_waiting
 
 
 --
+-- Name: notices notices_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notices
+    ADD CONSTRAINT notices_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE RESTRICT;
+
+
+--
 -- Name: practice_sessions practice_sessions_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1522,5 +1595,5 @@ ALTER TABLE ONLY public.tickets
 -- PostgreSQL database dump complete
 --
 
-\unrestrict M1bai4BeGqghLeDRkpUmbGza31uQSnahIMKHPw7hEI0ivZ2BqQmkOxFUps8qiKQ
+\unrestrict rGgIy3gVnCInVjc2OvcE7uiXpOSBidgz2DG4rtG2jpx0tpxYtZitVHRPT05qAyQ
 

@@ -7,3 +7,4 @@ dist/
 /*.MD
 !README.md
 !/.github/
+/md/
