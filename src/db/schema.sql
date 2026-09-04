@@ -73,7 +73,7 @@ CREATE TABLE public.event_series (
     category character varying(20) NOT NULL,
     venue_id integer NOT NULL,
     duration_ms integer DEFAULT 300000 NOT NULL,
-    entry_fee_points integer DEFAULT 500 NOT NULL,
+    entry_fee_tickets integer DEFAULT 500 NOT NULL,
     prize character varying(120) NOT NULL,
     poster_color character varying(7) NOT NULL,
     poster_initial character varying(8) DEFAULT ''::character varying NOT NULL,
@@ -82,7 +82,7 @@ CREATE TABLE public.event_series (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT event_series_category_check CHECK (((category)::text = ANY (ARRAY[('concert'::character varying)::text, ('musical'::character varying)::text, ('sports'::character varying)::text, ('theater'::character varying)::text, ('festival'::character varying)::text]))),
-    CONSTRAINT event_series_entry_fee_points_check CHECK (((entry_fee_points >= 0) AND (entry_fee_points <= 100000)))
+    CONSTRAINT event_series_entry_fee_points_check CHECK (((entry_fee_tickets >= 0) AND (entry_fee_tickets <= 100000)))
 );
 
 
@@ -120,7 +120,7 @@ CREATE TABLE public.events (
     opens_at timestamp with time zone NOT NULL,
     closes_at timestamp with time zone NOT NULL,
     duration_ms integer DEFAULT 300000 NOT NULL,
-    entry_fee_points integer DEFAULT 500 NOT NULL,
+    entry_fee_tickets integer DEFAULT 500 NOT NULL,
     registration_deadline timestamp with time zone NOT NULL,
     prize character varying(120) NOT NULL,
     poster_color character varying(7) NOT NULL,
@@ -135,7 +135,7 @@ CREATE TABLE public.events (
     cancel_reason text,
     hidden_at timestamp with time zone,
     CONSTRAINT events_category_check CHECK (((category)::text = ANY (ARRAY[('concert'::character varying)::text, ('musical'::character varying)::text, ('sports'::character varying)::text, ('theater'::character varying)::text, ('festival'::character varying)::text]))),
-    CONSTRAINT events_entry_fee_points_check CHECK (((entry_fee_points >= 0) AND (entry_fee_points <= 100000))),
+    CONSTRAINT events_entry_fee_points_check CHECK (((entry_fee_tickets >= 0) AND (entry_fee_tickets <= 100000))),
     CONSTRAINT events_opens_closes_check CHECK ((opens_at < closes_at)),
     CONSTRAINT events_registered_count_check CHECK ((registered_count >= 0)),
     CONSTRAINT events_status_check CHECK (((status)::text = ANY (ARRAY[('scheduled'::character varying)::text, ('open'::character varying)::text, ('closed'::character varying)::text, ('cancelled'::character varying)::text]))),

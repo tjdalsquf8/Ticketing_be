@@ -66,7 +66,7 @@ export interface CreateTestEventOptions {
   status?: "scheduled" | "open" | "closed" | "cancelled";
   opensAt?: Date;
   durationMs?: number;
-  entryFeePoints?: number;
+  entryFeeTickets?: number;
   category?: string;
   registrationDeadline?: Date;
   venueSlug?: string;
@@ -77,7 +77,7 @@ export interface CreateTestEventOptions {
 export interface TestEventResult {
   eventId: number;
   venueSlug: string;
-  entryFeePoints: number;
+  entryFeeTickets: number;
 }
 
 /**
@@ -91,7 +91,7 @@ export async function createTestEvent(
   const {
     status         = "scheduled",
     durationMs     = 300000,
-    entryFeePoints = 500,
+    entryFeeTickets = 500,
     category       = "concert",
     venueSlug      = DEFAULT_VENUE_SLUG,
     seriesId       = null,
@@ -124,14 +124,14 @@ export async function createTestEvent(
   const res = await pool.query(
     `INSERT INTO events
        (type, title, category, venue_id, total_seats, opens_at, closes_at,
-        duration_ms, entry_fee_points, registration_deadline, prize,
+        duration_ms, entry_fee_tickets, registration_deadline, prize,
         poster_color, poster_initial, status, series_id, created_by)
      VALUES ('paid', $1, $2, $3, $4, $5, $6, $7, $8, $9, 'test prize', '#123456', 'T', $10, $11, $12)
      RETURNING id`,
     [
       title, category, venueId, totalSeats,
       opensAt.toISOString(), closesAt.toISOString(),
-      durationMs, entryFeePoints, registrationDeadline.toISOString(),
+      durationMs, entryFeeTickets, registrationDeadline.toISOString(),
       status, seriesId, adminUserId,
     ],
   );
@@ -139,7 +139,7 @@ export async function createTestEvent(
   return {
     eventId:       res.rows[0].id as number,
     venueSlug,
-    entryFeePoints,
+    entryFeeTickets,
   };
 }
 

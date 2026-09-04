@@ -111,7 +111,7 @@ describe("Events Admin API", () => {
           opensAt:        futureISO(10),
           prize:          "test prize",
           posterColor:    "#AABBCC",
-          entryFeePoints: 500,
+          entryFeeTickets: 500,
         });
 
       expect(res.status).toBe(201);
@@ -373,7 +373,7 @@ describe("Events Admin API", () => {
     it("[6-1] 정상 취소 → 200, 신청자 자동 환불 (pending → refunded)", async () => {
       const user = await createTestUserWithPoints(2000);
       const fee  = 500;
-      const { eventId } = await createTestEvent({ entryFeePoints: fee }, admin.userId);
+      const { eventId } = await createTestEvent({ entryFeeTickets: fee }, admin.userId);
       createdEventIds.push(eventId);
 
       // 사용자 신청 직접 INSERT
