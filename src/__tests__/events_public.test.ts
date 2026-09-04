@@ -287,7 +287,7 @@ describe("Events Public API", () => {
 
     it("[4-4] 로그인 유저가 신청한 이벤트 조회 → myRegistration 포함", async () => {
       const user = await createTestUserWithPoints(1000);
-      const { eventId } = await createTestEvent({ entryFeePoints: 500 }, admin.userId);
+      const { eventId } = await createTestEvent({ entryFeeTickets: 500 }, admin.userId);
       createdEventIds.push(eventId);
 
       // 신청 직접 삽입

@@ -18,7 +18,7 @@ export interface EventRow {
   opensAt: string;
   closesAt: string;
   durationMs: number;
-  entryFeePoints: number;
+  entryFeeTickets: number;
   registrationDeadline: string;
   prize: string;
   posterColor: string;
@@ -104,7 +104,7 @@ function mapEvent(row: Record<string, unknown>): EventRow {
     opensAt:              (row.opens_at as Date).toISOString(),
     closesAt:             (row.closes_at as Date).toISOString(),
     durationMs:           row.duration_ms as number,
-    entryFeePoints:       row.entry_fee_points as number,
+    entryFeeTickets:       row.entry_fee_tickets as number,
     registrationDeadline: (row.registration_deadline as Date).toISOString(),
     prize:                row.prize as string,
     posterColor:          row.poster_color as string,
@@ -143,7 +143,7 @@ function mapRegistration(row: Record<string, unknown>): EventRegistrationRow {
 const EVENT_SELECT = `
   e.id, e.type, e.category, e.title,
   v.slug AS venue_slug, v.name AS venue_name, v.layout AS venue_layout,
-  e.total_seats, e.opens_at, e.closes_at, e.duration_ms, e.entry_fee_points,
+  e.total_seats, e.opens_at, e.closes_at, e.duration_ms, e.entry_fee_tickets,
   e.registration_deadline, e.prize, e.poster_color, e.poster_initial,
   e.status, e.series_id, e.registered_count, e.created_by,
   e.created_at, e.updated_at, e.cancelled_at, e.cancel_reason, e.hidden_at
@@ -341,7 +341,7 @@ async function registerEvent(
 
     // 이벤트 로우 락: 검증~INSERT 사이 상태 변경 방지
     const eventRes = await client.query(
-      `SELECT id, status, entry_fee_points, registration_deadline
+      `SELECT id, status, entry_fee_tickets, registration_deadline
        FROM public.events
        WHERE id = $1
        FOR UPDATE`,
@@ -389,7 +389,7 @@ async function registerEvent(
       throw makeError("ALREADY_REGISTERED", 409, "이미 신청한 이벤트입니다.");
     }
 
-    const entryFeePoints: number = event.entry_fee_points;
+    const entryFeeTickets: number = event.entry_fee_tickets;
 
     // 포인트 잔액 확인 + 차감 (원자적 UPDATE)
     const pointsRes = await client.query(
@@ -397,11 +397,11 @@ async function registerEvent(
        SET points = points - $1
        WHERE id = $2 AND points >= $1
        RETURNING points`,
-      [entryFeePoints, userId],
+      [entryFeeTickets, userId],
     );
     if ((pointsRes.rowCount ?? 0) === 0) {
       await client.query("ROLLBACK");
-      throw makeError("INSUFFICIENT_POINTS", 409, "포인트가 부족합니다.");
+      throw makeError("INSUFFICIENT_TICKETS", 409, "보유 티켓이 부족합니다.");
     }
 
     // 신청 레코드 생성
@@ -410,7 +410,7 @@ async function registerEvent(
          (event_id, user_id, points_paid, status)
        VALUES ($1, $2, $3, 'pending')
        RETURNING *`,
-      [eventId, userId, entryFeePoints],
+      [eventId, userId, entryFeeTickets],
     );
 
     // registeredCount 증가
@@ -802,7 +802,7 @@ async function createEvent(
     venueId: string;  // slug 문자열
     opensAt: string;
     durationMs?: number;
-    entryFeePoints?: number;
+    entryFeeTickets?: number;
     prize: string;
     posterColor: string;
     posterInitial?: string;
@@ -814,7 +814,7 @@ async function createEvent(
     opensAt, prize, posterColor,
   } = params;
   const durationMs     = params.durationMs     ?? 300000;
-  const entryFeePoints = params.entryFeePoints ?? 500;
+  const entryFeeTickets = params.entryFeeTickets ?? 500;
   const posterInitial  = params.posterInitial  ?? "";
 
   const now = new Date();
@@ -859,14 +859,14 @@ async function createEvent(
   const insertRes = await pool.query(
     `INSERT INTO public.events
        (type, title, category, venue_id, total_seats, opens_at, closes_at,
-        duration_ms, entry_fee_points, registration_deadline, prize,
+        duration_ms, entry_fee_tickets, registration_deadline, prize,
         poster_color, poster_initial, status, created_by)
      VALUES ('paid', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'scheduled', $13)
      RETURNING *`,
     [
       title, category, venueIntId, totalSeats,
       opensAtDate.toISOString(), closesAt.toISOString(),
-      durationMs, entryFeePoints, registrationDeadline.toISOString(),
+      durationMs, entryFeeTickets, registrationDeadline.toISOString(),
       prize, posterColor, posterInitial, createdBy,
     ],
   );
@@ -894,7 +894,7 @@ async function createEventSeries(
     category: string;
     venueId: string;  // slug 문자열
     durationMs?: number;
-    entryFeePoints?: number;
+    entryFeeTickets?: number;
     prize: string;
     posterColor: string;
     posterInitial?: string;
@@ -910,7 +910,7 @@ async function createEventSeries(
     title, category, venueId, prize, posterColor,
   } = params;
   const durationMs     = params.durationMs     ?? 300000;
-  const entryFeePoints = params.entryFeePoints ?? 500;
+  const entryFeeTickets = params.entryFeeTickets ?? 500;
   const posterInitial  = params.posterInitial  ?? "";
   const { kind, weekdays, startAt } = params.recurrence;
 
@@ -987,12 +987,12 @@ async function createEventSeries(
 
     const seriesInsert = await client.query(
       `INSERT INTO public.event_series
-         (title, category, venue_id, duration_ms, entry_fee_points,
+         (title, category, venue_id, duration_ms, entry_fee_tickets,
           prize, poster_color, poster_initial, recurrence, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
       [
-        title, category, venueIntId, durationMs, entryFeePoints,
+        title, category, venueIntId, durationMs, entryFeeTickets,
         prize, posterColor, posterInitial,
         JSON.stringify(recurrenceJson), createdBy,
       ],
@@ -1026,14 +1026,14 @@ async function createEventSeries(
       const evInsert = await client.query(
         `INSERT INTO public.events
            (type, title, category, venue_id, total_seats, opens_at, closes_at,
-            duration_ms, entry_fee_points, registration_deadline, prize,
+            duration_ms, entry_fee_tickets, registration_deadline, prize,
             poster_color, poster_initial, status, series_id, created_by)
          VALUES ('paid', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'scheduled', $13, $14)
          RETURNING id`,
         [
           title, category, venueIntId, totalSeats,
           opensAtDate.toISOString(), closesAt.toISOString(),
-          durationMs, entryFeePoints, registrationDeadline.toISOString(),
+          durationMs, entryFeeTickets, registrationDeadline.toISOString(),
           prize, posterColor, posterInitial, series.id, createdBy,
         ],
       );
@@ -1065,7 +1065,7 @@ async function createEventSeries(
         category:       series.category,
         venueId:        venueId,    // slug 문자열 반환
         durationMs:     series.duration_ms,
-        entryFeePoints: series.entry_fee_points,
+        entryFeeTickets: series.entry_fee_tickets,
         prize:          series.prize,
         posterColor:    series.poster_color,
         posterInitial:  series.poster_initial,
@@ -1157,7 +1157,7 @@ async function updateEvent(
     venueId?: string;  // slug 문자열
     opensAt?: string;
     durationMs?: number;
-    entryFeePoints?: number;
+    entryFeeTickets?: number;
     prize?: string;
     posterColor?: string;
     posterInitial?: string;
@@ -1263,7 +1263,7 @@ async function updateEvent(
     prize:          "prize",
     posterColor:    "poster_color",
     posterInitial:  "poster_initial",
-    entryFeePoints: "entry_fee_points",
+    entryFeeTickets: "entry_fee_tickets",
   };
 
   for (const [key, col] of Object.entries(fieldMap)) {

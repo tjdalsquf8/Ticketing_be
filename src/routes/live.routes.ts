@@ -14,6 +14,10 @@ import {
 
 const router = Router();
 
+// optionalAuthMiddleware 를 liveLimiter 보다 먼저 태운다.
+// liveLimiter 가 req.user 기준으로 카운트하므로, 인증 파싱이 뒤에 오면 로그인 유저도
+// 항상 IP 키로 떨어져 같은 공유기 사용자끼리 예산을 나눠 쓰게 된다.
+router.use(optionalAuthMiddleware);
 router.use(liveLimiter);
 
 // ─── 공개 조회 라우트 ──────────────────────────────────────────────────────────
@@ -25,7 +29,6 @@ router.get("/rounds/:roundId", roundIdParamValidator, liveController.getRoundByI
 // ─── 참여 API 라우트 ──────────────────────────────────────────────────────────
 router.post(
   "/rounds/:roundId/sessions",
-  optionalAuthMiddleware,
   roundIdParamValidator,
   createSessionBodyValidator,
   participateController.postCreateSession,
@@ -33,21 +36,18 @@ router.post(
 
 router.get(
   "/sessions/:sessionId/queue",
-  optionalAuthMiddleware,
   sessionIdParamValidator,
   participateController.getQueue,
 );
 
 router.get(
   "/sessions/:sessionId/seats",
-  optionalAuthMiddleware,
   sessionIdParamValidator,
   participateController.getSeats,
 );
 
 router.post(
   "/sessions/:sessionId/hold",
-  optionalAuthMiddleware,
   sessionIdParamValidator,
   holdBodyValidator,
   participateController.postHold,
@@ -55,7 +55,6 @@ router.post(
 
 router.post(
   "/sessions/:sessionId/confirm",
-  optionalAuthMiddleware,
   sessionIdParamValidator,
   confirmBodyValidator,
   participateController.postConfirm,

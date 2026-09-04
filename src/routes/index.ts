@@ -9,6 +9,8 @@ import liveRouter from "./live.routes";
 import timeRouter from "./time.routes";
 import ticketsRouter from "./tickets.routes";
 import eventsRouter from "./events.routes";
+import statsRouter from "./stats.routes";
+import noticesRouter from "./notices.routes";
 
 const router = Router();
 
@@ -22,5 +24,7 @@ router.use("/live", liveRouter);
 router.use("/time", timeRouter);
 router.use("/tickets", ticketsRouter);
 router.use("/events", eventsRouter);
+router.use("/stats", statsRouter);
+router.use("/notices", noticesRouter);
 
 export default router;

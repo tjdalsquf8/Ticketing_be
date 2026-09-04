@@ -53,6 +53,7 @@ const listEvents = async (req: Request, res: Response, next: NextFunction) => {
       limit,
     });
 
+    res.setHeader("Cache-Control", "public, max-age=60");
     res.status(200).json({
       success: true,
       data,
@@ -111,6 +112,7 @@ const getLatestEventRankings = async (req: Request, res: Response, next: NextFun
 const getNearestEvent = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const data = await eventsService.getNearestEvent();
+    res.setHeader("Cache-Control", "public, max-age=60");
     res.status(200).json({ success: true, data });
   } catch (err) {
     handleServiceError(err, next);

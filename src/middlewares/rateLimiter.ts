@@ -48,9 +48,13 @@ export const refreshLimiter = rateLimit({
   ),
 });
 
+// 전역 백스톱. 라우트별 리미터가 실제 정책을 담당하고, 이 리미터는 그 위에서
+// 봇/스크립트의 비정상 트래픽만 잘라내는 최후 방어선 역할만 한다.
+// 100/min(=초당 1.7회)은 홈 1회 로드가 8요청인 구조에서 정상 사용자를 먼저 막았다.
+// 새로고침 10여 번이면 소진돼 사이트 전체가 429 가 되던 원인.
 export const globalLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
+  max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipInTest,
@@ -60,17 +64,43 @@ export const globalLimiter = rateLimit({
   ),
 });
 
-// 공개 라이브 조회 API 전용. `/api/live/current`, `/next`, `/recent-results`, `/api/time`
-// 은 인증 없이 열려있어 봇/스크립트가 대량 폴링해 DB 를 태울 수 있음.
-// globalLimiter(1분 100회) 위에 얹어 더 좁게 제한. IP 기반 → 익명 트래픽 컷.
+// 라이브 티켓팅 API 전용(`/api/live/*`). 대기열 1초 폴링 + 좌석맵 2초 폴링이 동시에
+// 도는 구간이 있어 참여자 1명이 분당 90회 이상을 정상적으로 소비한다. 60/min 은
+// 혼자서도 넘겼고, IP 기반이라 같은 공유기의 3명이 60 을 나눠 쓰다 즉시 429 가 됐다.
+// → 상한을 180/min 으로 올리고, 다른 리미터들과 같이 "참여자 1명" 단위로 카운트한다.
+//
+// 키 우선순위: 로그인 유저 id → 게스트 uuid 쿠키 → IP.
+// live 는 비로그인 게스트도 참여하므로 guest_uuid 까지 키로 인정해야 NAT 뒤 게스트끼리
+// 서로 잡아먹지 않는다. 둘 다 없는 완전 익명 조회(/current, /next)만 IP 로 묶인다.
 export const liveLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 60,
+  max: 180,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInTest,
+  keyGenerator: (req: Request, res: Response) => {
+    if (req.user?.id) return `live:u${req.user.id}`;
+    const guestUuid = req.cookies?.guest_uuid as string | undefined;
+    if (guestUuid) return `live:g${guestUuid}`;
+    return ipKeyGenerator(req.ip ?? "unknown");
+  },
+  handler: envelopeHandler(
+    "TOO_MANY_LIVE_REQUESTS",
+    "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
+  ),
+});
+
+// 서버 시각 동기화(`/api/time`) 전용. 원래 liveLimiter 버킷을 공유했는데, 홈·이벤트
+// 상세 등 티켓팅과 무관한 화면도 이 엔드포인트를 쓰기 때문에 라이브 예산을 갉아먹었다.
+// DB 를 타지 않는 초경량 응답이므로 별도 통으로 분리하고 넉넉하게 둔다.
+export const timeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipInTest,
   handler: envelopeHandler(
-    "TOO_MANY_LIVE_REQUESTS",
+    "TOO_MANY_TIME_REQUESTS",
     "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
   ),
 });
@@ -95,8 +125,8 @@ export const ticketsLimiter = rateLimit({
 });
 
 // 이벤트 공개 조회 API 전용. `/api/events`, `/calendar`, `/nearest`, `/:eventId` 는
-// 인증 여부와 관계없이 대량 폴링·봇 열람 대상이 되기 쉬움. globalLimiter(1분 100회) 위에
-// 얹어 IP 기반으로 더 좁게 제한한다. liveLimiter 와 같은 정책(60/min).
+// 인증 여부와 관계없이 대량 폴링·봇 열람 대상이 되기 쉬움. globalLimiter(1분 1000회) 위에
+// 얹어 IP 기반으로 더 좁게 제한한다.
 export const eventsLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
@@ -105,6 +135,33 @@ export const eventsLimiter = rateLimit({
   skip: skipInTest,
   handler: envelopeHandler(
     "TOO_MANY_EVENT_REQUESTS",
+    "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
+  ),
+});
+
+// 홈 통계(`/api/stats/daily`) 전용. 인증 불필요 공개 조회라 봇 폴링 대상이 되기 쉽고,
+// 캐시 미스 시 쿼리 3개가 실행돼 globalLimiter만으로는 부족.
+export const statsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInTest,
+  handler: envelopeHandler(
+    "TOO_MANY_STATS_REQUESTS",
+    "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
+  ),
+});
+
+// 공지사항 공개 조회(`/api/notices`, `/api/notices/:id`) 전용. 인증 불필요 공개 조회.
+export const noticesLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInTest,
+  handler: envelopeHandler(
+    "TOO_MANY_NOTICE_REQUESTS",
     "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
   ),
 });
@@ -131,7 +188,7 @@ export const eventActionLimiter = rateLimit({
 
 // 이벤트 티켓팅 세션 후속 호출(queue/seats/hold/confirm) 전용. 좌석맵 폴링·좌석 잡기
 // 시도가 반복될 수 있어 완만하게, 그러나 인증 유저 기준 상한을 둔다. authMiddleware
-// 뒤 배치. liveLimiter(60/min) 와 유사하게 60/min 을 유저 단위로 부여.
+// 뒤 배치. 60/min 을 유저 단위로 부여.
 export const eventSessionLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,

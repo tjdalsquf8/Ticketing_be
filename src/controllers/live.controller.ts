@@ -29,6 +29,7 @@ const getLastRound = async (req: Request, res: Response, next: NextFunction) => 
         ? Math.min(Math.floor(rawLimit), 30)
         : 10;
     const data = await liveService.getLastRoundTopN(limit);
+    res.setHeader("Cache-Control", "public, max-age=60");
     res.status(200).json({ success: true, data });
   } catch (err) {
     next(err);

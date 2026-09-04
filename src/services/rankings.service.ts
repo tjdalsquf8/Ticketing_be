@@ -31,6 +31,7 @@ const getRankings = async (params: {
          COUNT(*) AS "ticketCount"
        FROM tickets t
        JOIN users u ON u.id = t.user_id
+       WHERE t.round_id IS NOT NULL
        GROUP BY u.id, u.name
        ORDER BY COUNT(*) DESC
        LIMIT $1 OFFSET $2`,
@@ -38,7 +39,7 @@ const getRankings = async (params: {
     );
 
     const countResult = await pool.query(
-      `SELECT COUNT(DISTINCT user_id) AS total FROM tickets`,
+      `SELECT COUNT(DISTINCT user_id) AS total FROM tickets WHERE round_id IS NOT NULL`,
     );
 
     return {

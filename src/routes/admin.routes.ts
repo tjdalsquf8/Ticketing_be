@@ -6,6 +6,7 @@ import * as adminController from "../controllers/admin.controller";
 import * as adminEventsController from "../controllers/admin.events.controller";
 import * as gifticonsController from "../controllers/gifticons.controller";
 import * as settlementsController from "../controllers/settlements.controller";
+import * as noticesController from "../controllers/notices.controller";
 import {
   putConfigVenueValidator,
   putConfigScheduleValidator,
@@ -24,6 +25,12 @@ import {
   listSettlementsQueryValidator,
   issueSettlementBodyValidator,
 } from "../middlewares/validators/settlements.validator";
+import {
+  noticeIdParamValidator,
+  listAdminNoticesQueryValidator,
+  createNoticeBodyValidator,
+  updateNoticeBodyValidator,
+} from "../middlewares/validators/notices.validator";
 import {
   eventIdParamValidator,
   seriesIdParamValidator,
@@ -204,6 +211,33 @@ router.post(
   settlementIdParamValidator,
   issueSettlementBodyValidator,
   settlementsController.issueSettlement,
+);
+
+// ─── 공지사항 관리 ───────────────────────────────────────────────────────────
+
+router.get(
+  "/notices",
+  listAdminNoticesQueryValidator,
+  noticesController.adminListNotices,
+);
+
+router.post(
+  "/notices",
+  createNoticeBodyValidator,
+  noticesController.createNotice,
+);
+
+router.patch(
+  "/notices/:id",
+  noticeIdParamValidator,
+  updateNoticeBodyValidator,
+  noticesController.updateNotice,
+);
+
+router.delete(
+  "/notices/:id",
+  noticeIdParamValidator,
+  noticesController.deleteNotice,
 );
 
 export default router;

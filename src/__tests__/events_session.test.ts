@@ -42,7 +42,7 @@ async function createOpenEvent(adminUserId: number): Promise<{ eventId: number }
   const opensAt = new Date(Date.now() - 10 * 60 * 1000); // 10분 전 오픈
   // durationMs = 2시간 → closesAt = opensAt + 2h = 지금+110분 (충분히 미래)
   const { eventId } = await createTestEvent(
-    { status: "open", opensAt, entryFeePoints: 0, durationMs: 2 * 60 * 60 * 1000 },
+    { status: "open", opensAt, entryFeeTickets: 0, durationMs: 2 * 60 * 60 * 1000 },
     adminUserId,
   );
   return { eventId };

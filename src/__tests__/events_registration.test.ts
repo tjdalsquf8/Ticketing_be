@@ -55,7 +55,7 @@ describe("Events Registration API", () => {
     it("[1-1] 정상 신청 → 201, registrationId 반환, 포인트 차감, registeredCount++", async () => {
       const fee  = 500;
       const user = await createTestUserWithPoints(1000);
-      const { eventId } = await createTestEvent({ entryFeePoints: fee }, admin.userId);
+      const { eventId } = await createTestEvent({ entryFeeTickets: fee }, admin.userId);
       createdEventIds.push(eventId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -96,7 +96,7 @@ describe("Events Registration API", () => {
 
     it("[1-3] 이미 신청한 이벤트 재신청 → 409 ALREADY_REGISTERED", async () => {
       const user = await createTestUserWithPoints(2000);
-      const { eventId } = await createTestEvent({ entryFeePoints: 500 }, admin.userId);
+      const { eventId } = await createTestEvent({ entryFeeTickets: 500 }, admin.userId);
       createdEventIds.push(eventId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -115,9 +115,9 @@ describe("Events Registration API", () => {
       expect(res.body.error.code).toBe("ALREADY_REGISTERED");
     });
 
-    it("[1-4] 포인트 부족 → 409 INSUFFICIENT_POINTS", async () => {
-      const user = await createTestUserWithPoints(100); // 포인트 부족
-      const { eventId } = await createTestEvent({ entryFeePoints: 500 }, admin.userId);
+    it("[1-4] 보유 티켓 부족 → 409 INSUFFICIENT_TICKETS", async () => {
+      const user = await createTestUserWithPoints(100); // 티켓 잔액 부족
+      const { eventId } = await createTestEvent({ entryFeeTickets: 500 }, admin.userId);
       createdEventIds.push(eventId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -126,7 +126,7 @@ describe("Events Registration API", () => {
         .set("Content-Type", "application/json");
 
       expect(res.status).toBe(409);
-      expect(res.body.error.code).toBe("INSUFFICIENT_POINTS");
+      expect(res.body.error.code).toBe("INSUFFICIENT_TICKETS");
     });
 
     it("[1-5] 마감 후 신청 → 409 REGISTRATION_CLOSED", async () => {
@@ -208,7 +208,7 @@ describe("Events Registration API", () => {
     it("[2-1] 정상 취소 → 200, 포인트 환불, registeredCount--", async () => {
       const fee  = 500;
       const user = await createTestUserWithPoints(1000);
-      const { eventId } = await createTestEvent({ entryFeePoints: fee }, admin.userId);
+      const { eventId } = await createTestEvent({ entryFeeTickets: fee }, admin.userId);
       createdEventIds.push(eventId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -305,7 +305,7 @@ describe("Events Registration API", () => {
       for (let i = 0; i < 2; i++) {
         const opensAt = new Date(Date.now() + (i + 1) * 60 * 60 * 1000);
         const { eventId } = await createTestEvent(
-          { entryFeePoints: 500, opensAt },
+          { entryFeeTickets: 500, opensAt },
           admin.userId,
         );
         createdEventIds.push(eventId);
@@ -336,7 +336,7 @@ describe("Events Registration API", () => {
       for (let i = 0; i < 2; i++) {
         const opensAt = new Date(Date.now() + (i + 5) * 60 * 60 * 1000);
         const { eventId } = await createTestEvent(
-          { entryFeePoints: 500, opensAt },
+          { entryFeeTickets: 500, opensAt },
           admin.userId,
         );
         createdEventIds.push(eventId);
@@ -360,7 +360,7 @@ describe("Events Registration API", () => {
       for (let i = 0; i < 2; i++) {
         const opensAt = new Date(Date.now() + (i + 10) * 60 * 60 * 1000);
         const { eventId } = await createTestEvent(
-          { entryFeePoints: 500, opensAt },
+          { entryFeeTickets: 500, opensAt },
           admin.userId,
         );
         createdEventIds.push(eventId);

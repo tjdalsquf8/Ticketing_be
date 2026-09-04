@@ -96,6 +96,19 @@ function buildActorKey(
   throw makeError("BAD_REQUEST", 400, "userId 또는 guestUuid 가 필요합니다");
 }
 
+/** uq_live_sessions_round_nickname_guest 위반(다른 게스트가 같은 회차에서 이미 쓰는 닉네임) 여부 */
+function isNicknameUniqueViolation(err: unknown): boolean {
+  return (
+    err != null &&
+    typeof err === "object" &&
+    "code" in err &&
+    (err as { code: unknown }).code === "23505" &&
+    "constraint" in err &&
+    (err as { constraint: unknown }).constraint ===
+      "uq_live_sessions_round_nickname_guest"
+  );
+}
+
 // ─── 서비스 함수 ─────────────────────────────────────────────────────────────
 
 /**
@@ -156,23 +169,56 @@ async function createSession(
     };
   }
 
+  // 게스트 닉네임 회차 내 중복 사전 차단: 다른 게스트가 이 회차에서 이미 쓰는 중인 닉네임이면 거절.
+  // 회원 닉네임(user_id)은 대상 아님 — 계정 표시명 충돌까지 막을 필요는 없음.
+  if (guestUuid != null) {
+    const nicknameTaken = await pool.query(
+      `SELECT 1 FROM live_sessions
+       WHERE round_id = $1 AND nickname = $2 AND guest_uuid IS NOT NULL AND guest_uuid != $3
+         AND status IN ('queued', 'active', 'completed')
+       LIMIT 1`,
+      [roundId, nickname, guestUuid],
+    );
+    if ((nicknameTaken.rowCount ?? 0) > 0) {
+      throw makeError(
+        "NICKNAME_TAKEN_IN_ROUND",
+        409,
+        "다른 게스트가 이미 사용 중인 닉네임입니다.",
+      );
+    }
+  }
+
   // session_id 생성 (12자 hex)
   const sessionId = crypto.randomBytes(10).toString("hex");
 
   const activeCapacity = config.live.activeCapacity;
 
   // active INSERT 시도: 정원 여유가 있을 때만 성공 (원자적 조건부 INSERT)
-  const activeResult = await pool.query(
-    `INSERT INTO live_sessions
-       (session_id, round_id, user_id, guest_uuid, nickname, status, started_at)
-     SELECT $1, $2, $3, $4, $5, 'active', NOW()
-     WHERE (
-       SELECT COUNT(*) FROM live_sessions
-       WHERE round_id = $2 AND status = 'active'
-     ) < $6
-     RETURNING session_id, status, queue_position, started_at`,
-    [sessionId, roundId, userId ?? null, guestUuid ?? null, nickname, activeCapacity],
-  );
+  // uq_live_sessions_round_nickname_guest 위반 시 위 사전 체크를 통과한 직후의 동시 요청 경합 —
+  // 동일하게 NICKNAME_TAKEN_IN_ROUND 로 처리한다.
+  let activeResult;
+  try {
+    activeResult = await pool.query(
+      `INSERT INTO live_sessions
+         (session_id, round_id, user_id, guest_uuid, nickname, status, started_at)
+       SELECT $1, $2, $3, $4, $5, 'active', NOW()
+       WHERE (
+         SELECT COUNT(*) FROM live_sessions
+         WHERE round_id = $2 AND status = 'active'
+       ) < $6
+       RETURNING session_id, status, queue_position, started_at`,
+      [sessionId, roundId, userId ?? null, guestUuid ?? null, nickname, activeCapacity],
+    );
+  } catch (err) {
+    if (isNicknameUniqueViolation(err)) {
+      throw makeError(
+        "NICKNAME_TAKEN_IN_ROUND",
+        409,
+        "다른 게스트가 이미 사용 중인 닉네임입니다.",
+      );
+    }
+    throw err;
+  }
 
   if ((activeResult.rowCount ?? 0) > 0) {
     const inserted = activeResult.rows[0];
@@ -185,17 +231,29 @@ async function createSession(
   }
 
   // 정원 초과 → queued INSERT (queue_position 원자적 계산)
-  const queuedResult = await pool.query(
-    `INSERT INTO live_sessions
-       (session_id, round_id, user_id, guest_uuid, nickname, status, queue_position, started_at)
-     VALUES ($1, $2, $3, $4, $5, 'queued',
-       (SELECT COALESCE(MAX(queue_position), 0) + 1
-        FROM live_sessions
-        WHERE round_id = $2 AND status = 'queued'),
-       NOW())
-     RETURNING session_id, status, queue_position, started_at`,
-    [sessionId, roundId, userId ?? null, guestUuid ?? null, nickname],
-  );
+  let queuedResult;
+  try {
+    queuedResult = await pool.query(
+      `INSERT INTO live_sessions
+         (session_id, round_id, user_id, guest_uuid, nickname, status, queue_position, started_at)
+       VALUES ($1, $2, $3, $4, $5, 'queued',
+         (SELECT COALESCE(MAX(queue_position), 0) + 1
+          FROM live_sessions
+          WHERE round_id = $2 AND status = 'queued'),
+         NOW())
+       RETURNING session_id, status, queue_position, started_at`,
+      [sessionId, roundId, userId ?? null, guestUuid ?? null, nickname],
+    );
+  } catch (err) {
+    if (isNicknameUniqueViolation(err)) {
+      throw makeError(
+        "NICKNAME_TAKEN_IN_ROUND",
+        409,
+        "다른 게스트가 이미 사용 중인 닉네임입니다.",
+      );
+    }
+    throw err;
+  }
 
   const queued = queuedResult.rows[0];
   return {
@@ -677,6 +735,14 @@ async function confirmSeat(params: {
             ],
           );
           ticketId = insertRes.rows[0]?.id ?? null;
+
+          // 티켓 발급 성공 → 보유 티켓 잔액(points) +1
+          if (ticketId != null) {
+            await client.query(
+              `UPDATE public.users SET points = points + 1 WHERE id = $1`,
+              [sessionUserId],
+            );
+          }
 
           // 이벤트 세션: event_registrations.ticket_id 연결 + status → ticketed
           if (isEventSession && ticketId != null) {

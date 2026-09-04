@@ -125,10 +125,10 @@ const createEventBodyValidator = [
     // 상한 24시간(86,400,000ms). 실수/악의로 수년~수십년 뒤 closesAt 설정 방지.
     .isInt({ min: 1, max: 86400000 })
     .withMessage("durationMs는 1~86,400,000(24시간) 범위의 정수여야 합니다."),
-  body("entryFeePoints")
+  body("entryFeeTickets")
     .optional()
     .isInt({ min: 0, max: 100000 })
-    .withMessage("entryFeePoints는 0~100,000 범위의 정수여야 합니다."),
+    .withMessage("entryFeeTickets는 0~100,000 범위의 정수여야 합니다."),
   body("prize")
     .trim()
     .notEmpty()
@@ -170,10 +170,10 @@ const createSeriesBodyValidator = [
     // 상한 24시간(86,400,000ms). 실수/악의로 수년~수십년 뒤 closesAt 설정 방지.
     .isInt({ min: 1, max: 86400000 })
     .withMessage("durationMs는 1~86,400,000(24시간) 범위의 정수여야 합니다."),
-  body("entryFeePoints")
+  body("entryFeeTickets")
     .optional()
     .isInt({ min: 0, max: 100000 })
-    .withMessage("entryFeePoints는 0~100,000 범위의 정수여야 합니다."),
+    .withMessage("entryFeeTickets는 0~100,000 범위의 정수여야 합니다."),
   body("prize")
     .trim()
     .notEmpty()
@@ -237,10 +237,10 @@ const updateEventBodyValidator = [
     // 상한 24시간(86,400,000ms). 실수/악의로 수년~수십년 뒤 closesAt 설정 방지.
     .isInt({ min: 1, max: 86400000 })
     .withMessage("durationMs는 1~86,400,000(24시간) 범위의 정수여야 합니다."),
-  body("entryFeePoints")
+  body("entryFeeTickets")
     .optional()
     .isInt({ min: 0, max: 100000 })
-    .withMessage("entryFeePoints는 0~100,000 범위의 정수여야 합니다."),
+    .withMessage("entryFeeTickets는 0~100,000 범위의 정수여야 합니다."),
   body("prize")
     .optional()
     .trim()
