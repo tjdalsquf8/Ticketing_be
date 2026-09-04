@@ -736,10 +736,10 @@ async function confirmSeat(params: {
           );
           ticketId = insertRes.rows[0]?.id ?? null;
 
-          // 티켓 발급 성공 → 보유 티켓 잔액(points) +1
+          // 티켓 발급 성공 → 보유 티켓 잔액 +1
           if (ticketId != null) {
             await client.query(
-              `UPDATE public.users SET points = points + 1 WHERE id = $1`,
+              `UPDATE public.users SET tickets = tickets + 1 WHERE id = $1`,
               [sessionUserId],
             );
           }

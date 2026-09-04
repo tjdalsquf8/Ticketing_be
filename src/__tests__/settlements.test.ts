@@ -11,7 +11,7 @@ import app from "../app";
 import pool from "../config/db";
 import {
   createAdminUser,
-  createTestUserWithPoints,
+  createTestUserWithTickets,
   createTestEvent,
   cleanupTestEvents,
   cleanupTestEvUsers,
@@ -90,7 +90,7 @@ async function insertGifticon(opts: {
 beforeAll(async () => {
   await cleanupTestEvUsers();
   admin = await createAdminUser();
-  normalUser = await createTestUserWithPoints(10000);
+  normalUser = await createTestUserWithTickets(10000);
   adminAgent = await loginAgent(admin.email, admin.password);
   normalAgent = await loginAgent(normalUser.email, normalUser.password);
 });

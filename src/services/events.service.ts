@@ -38,13 +38,13 @@ export interface EventRegistrationRow {
   registrationId: number;
   eventId: number;
   userId: number;
-  pointsPaid: number;
+  ticketsPaid: number;
   registeredAt: string;
   status: string;
   ticketId: number | null;
   cancelledAt: string | null;
   refundedAt: string | null;
-  refundPoints: number | null;
+  refundTickets: number | null;
 }
 
 export interface VenueRow {
@@ -129,13 +129,13 @@ function mapRegistration(row: Record<string, unknown>): EventRegistrationRow {
     registrationId: row.id as number,
     eventId:        row.event_id as number,
     userId:         row.user_id as number,
-    pointsPaid:     row.points_paid as number,
+    ticketsPaid:    row.tickets_paid as number,
     registeredAt:   (row.registered_at as Date).toISOString(),
     status:         row.status as string,
     ticketId:       (row.ticket_id ?? null) as number | null,
     cancelledAt:    row.cancelled_at ? (row.cancelled_at as Date).toISOString() : null,
     refundedAt:     row.refunded_at  ? (row.refunded_at  as Date).toISOString() : null,
-    refundPoints:   (row.refund_points ?? null) as number | null,
+    refundTickets:  (row.refund_tickets ?? null) as number | null,
   };
 }
 
@@ -391,15 +391,15 @@ async function registerEvent(
 
     const entryFeeTickets: number = event.entry_fee_tickets;
 
-    // 포인트 잔액 확인 + 차감 (원자적 UPDATE)
-    const pointsRes = await client.query(
+    // 티켓 잔액 확인 + 차감 (원자적 UPDATE)
+    const ticketsRes = await client.query(
       `UPDATE public.users
-       SET points = points - $1
-       WHERE id = $2 AND points >= $1
-       RETURNING points`,
+       SET tickets = tickets - $1
+       WHERE id = $2 AND tickets >= $1
+       RETURNING tickets`,
       [entryFeeTickets, userId],
     );
-    if ((pointsRes.rowCount ?? 0) === 0) {
+    if ((ticketsRes.rowCount ?? 0) === 0) {
       await client.query("ROLLBACK");
       throw makeError("INSUFFICIENT_TICKETS", 409, "보유 티켓이 부족합니다.");
     }
@@ -407,7 +407,7 @@ async function registerEvent(
     // 신청 레코드 생성
     const regRes = await client.query(
       `INSERT INTO public.event_registrations
-         (event_id, user_id, points_paid, status)
+         (event_id, user_id, tickets_paid, status)
        VALUES ($1, $2, $3, 'pending')
        RETURNING *`,
       [eventId, userId, entryFeeTickets],
@@ -453,7 +453,7 @@ async function cancelMyRegistration(
        SET status = 'cancelled',
            cancelled_at = NOW(),
            refunded_at = NOW(),
-           refund_points = er.points_paid
+           refund_tickets = er.tickets_paid
        FROM public.events e
        WHERE er.event_id = $1
          AND er.user_id = $2
@@ -480,12 +480,12 @@ async function cancelMyRegistration(
     }
 
     const reg = updated.rows[0];
-    const refundPoints: number = reg.points_paid;
+    const refundTickets: number = reg.tickets_paid;
 
-    // 포인트 환불
+    // 티켓 환불
     await client.query(
-      `UPDATE public.users SET points = points + $1 WHERE id = $2`,
-      [refundPoints, userId],
+      `UPDATE public.users SET tickets = tickets + $1 WHERE id = $2`,
+      [refundTickets, userId],
     );
 
     // registeredCount 감소
@@ -1341,7 +1341,7 @@ async function cancelEventWithClient(
 
   // pending 신청자 전원 환불
   const pendingRes = await client.query(
-    `SELECT id, user_id, points_paid
+    `SELECT id, user_id, tickets_paid
      FROM public.event_registrations
      WHERE event_id = $1 AND status = 'pending'`,
     [eventId],
@@ -1350,13 +1350,13 @@ async function cancelEventWithClient(
   for (const reg of pendingRes.rows) {
     await client.query(
       `UPDATE public.event_registrations
-       SET status = 'refunded', refunded_at = NOW(), refund_points = $1
+       SET status = 'refunded', refunded_at = NOW(), refund_tickets = $1
        WHERE id = $2`,
-      [reg.points_paid, reg.id],
+      [reg.tickets_paid, reg.id],
     );
     await client.query(
-      `UPDATE public.users SET points = points + $1 WHERE id = $2`,
-      [reg.points_paid, reg.user_id],
+      `UPDATE public.users SET tickets = tickets + $1 WHERE id = $2`,
+      [reg.tickets_paid, reg.user_id],
     );
   }
 }
@@ -1557,9 +1557,9 @@ async function getEventStats(eventId: number): Promise<EventStatsRow> {
          AS registered,
        COUNT(*) FILTER (WHERE status = 'ticketed') AS ticketed,
        COUNT(*) FILTER (WHERE status = 'no_show')  AS no_show,
-       COALESCE(SUM(points_paid)   FILTER (WHERE status IN ('pending','entered','ticketed','no_show','missed')), 0)
+       COALESCE(SUM(tickets_paid)   FILTER (WHERE status IN ('pending','entered','ticketed','no_show','missed')), 0)
          AS collected,
-       COALESCE(SUM(refund_points) FILTER (WHERE status IN ('cancelled','refunded')), 0)
+       COALESCE(SUM(refund_tickets) FILTER (WHERE status IN ('cancelled','refunded')), 0)
          AS refunded
      FROM public.event_registrations
      WHERE event_id = $1`,

@@ -19,7 +19,7 @@ import {
 } from "./helpers/live.helper";
 import {
   createAdminUser,
-  createTestUserWithPoints,
+  createTestUserWithTickets,
   cleanupTestEvUsers,
   type TestUserResult,
 } from "./helpers/events.helper";
@@ -50,7 +50,7 @@ beforeAll(async () => {
   await cleanupTestLiveUsers();
 
   admin = await createAdminUser();
-  const normal = await createTestUserWithPoints(0);
+  const normal = await createTestUserWithTickets(0);
 
   adminAgent  = await loginAgent(admin.email, admin.password);
   normalAgent = await loginAgent(normal.email, normal.password);

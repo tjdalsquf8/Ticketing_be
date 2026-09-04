@@ -24,8 +24,8 @@ export interface TestUserResult {
   name: string;
 }
 
-/** 테스트용 일반 유저 생성 (포인트 지정 가능) */
-export async function createTestUserWithPoints(points = 0): Promise<TestUserResult> {
+/** 테스트용 일반 유저 생성 (티켓 잔액 지정 가능) */
+export async function createTestUserWithTickets(tickets = 0): Promise<TestUserResult> {
   const rand     = crypto.randomBytes(5).toString("hex");
   const email    = `${TEST_EV_EMAIL_PREFIX}${rand}@test.com`;
   const password = "test1234!";
@@ -33,10 +33,10 @@ export async function createTestUserWithPoints(points = 0): Promise<TestUserResu
   const hashed   = await bcrypt.hash(password, 10);
 
   const res = await pool.query(
-    `INSERT INTO users (email, password, name, points)
+    `INSERT INTO users (email, password, name, tickets)
      VALUES ($1, $2, $3, $4)
      RETURNING id`,
-    [email, hashed, name, points],
+    [email, hashed, name, tickets],
   );
 
   return { userId: res.rows[0].id as number, email, password, name };
@@ -51,7 +51,7 @@ export async function createAdminUser(): Promise<TestUserResult> {
   const hashed   = await bcrypt.hash(password, 10);
 
   const res = await pool.query(
-    `INSERT INTO users (email, password, name, role, points)
+    `INSERT INTO users (email, password, name, role, tickets)
      VALUES ($1, $2, $3, 'admin', 10000)
      RETURNING id`,
     [email, hashed, name],
@@ -151,16 +151,16 @@ export async function createTestRegistration(
   userId: number,
   opts: {
     status?: string;
-    pointsPaid?: number;
+    ticketsPaid?: number;
   } = {},
 ): Promise<{ registrationId: number }> {
-  const { status = "pending", pointsPaid = 500 } = opts;
+  const { status = "pending", ticketsPaid = 500 } = opts;
 
   const res = await pool.query(
-    `INSERT INTO event_registrations (event_id, user_id, points_paid, status)
+    `INSERT INTO event_registrations (event_id, user_id, tickets_paid, status)
      VALUES ($1, $2, $3, $4)
      RETURNING id`,
-    [eventId, userId, pointsPaid, status],
+    [eventId, userId, ticketsPaid, status],
   );
 
   return { registrationId: res.rows[0].id as number };

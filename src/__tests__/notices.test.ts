@@ -14,7 +14,7 @@ import app from "../app";
 import pool from "../config/db";
 import {
   createAdminUser,
-  createTestUserWithPoints,
+  createTestUserWithTickets,
   cleanupTestEvUsers,
   type TestUserResult,
 } from "./helpers/events.helper";
@@ -39,7 +39,7 @@ describe("Notices API", () => {
   beforeAll(async () => {
     admin = await createAdminUser();
     adminAgent = await loginAgent(admin.email, admin.password);
-    normalUser = await createTestUserWithPoints();
+    normalUser = await createTestUserWithTickets();
     normalAgent = await loginAgent(normalUser.email, normalUser.password);
   });
 
