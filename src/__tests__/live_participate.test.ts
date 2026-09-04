@@ -510,9 +510,9 @@ describe("Live Participate API", () => {
       expect(ticket.rows.length).toBe(1);
       expect(ticket.rows[0].user_id).toBe(userId);
 
-      // 티켓 발급 시 보유 티켓 잔액(points) +1
-      const userRow = await pool.query(`SELECT points FROM users WHERE id = $1`, [userId]);
-      expect(userRow.rows[0].points).toBe(1);
+      // 티켓 발급 시 보유 티켓 잔액 +1
+      const userRow = await pool.query(`SELECT tickets FROM users WHERE id = $1`, [userId]);
+      expect(userRow.rows[0].tickets).toBe(1);
     });
 
     it("[5-2] 게스트 → ticketId: null", async () => {

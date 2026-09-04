@@ -12,7 +12,7 @@ import app from "../app";
 import pool from "../config/db";
 import {
   createAdminUser,
-  createTestUserWithPoints,
+  createTestUserWithTickets,
   createTestEvent,
   createTestRegistration,
   cleanupTestEvents,
@@ -286,12 +286,12 @@ describe("Events Public API", () => {
     });
 
     it("[4-4] 로그인 유저가 신청한 이벤트 조회 → myRegistration 포함", async () => {
-      const user = await createTestUserWithPoints(1000);
+      const user = await createTestUserWithTickets(1000);
       const { eventId } = await createTestEvent({ entryFeeTickets: 500 }, admin.userId);
       createdEventIds.push(eventId);
 
       // 신청 직접 삽입
-      await createTestRegistration(eventId, user.userId, { pointsPaid: 500 });
+      await createTestRegistration(eventId, user.userId, { ticketsPaid: 500 });
 
       const userAgent = await loginAgent(user.email, user.password);
       const res = await userAgent.get(`/api/events/${eventId}`);
@@ -303,7 +303,7 @@ describe("Events Public API", () => {
     });
 
     it("[4-5] 로그인 유저가 신청 안 한 이벤트 조회 → myRegistration: null", async () => {
-      const user = await createTestUserWithPoints(1000);
+      const user = await createTestUserWithTickets(1000);
       const { eventId } = await createTestEvent({}, admin.userId);
       createdEventIds.push(eventId);
 

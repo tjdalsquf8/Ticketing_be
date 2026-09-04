@@ -13,7 +13,7 @@ import app from "../app";
 import pool from "../config/db";
 import {
   createAdminUser,
-  createTestUserWithPoints,
+  createTestUserWithTickets,
   createTestEvent,
   createTestRegistration,
   cleanupTestEvents,
@@ -53,7 +53,7 @@ async function registerAndEnter(
   eventId: number,
   userId: number,
 ): Promise<{ registrationId: number }> {
-  return createTestRegistration(eventId, userId, { status: "pending", pointsPaid: 0 });
+  return createTestRegistration(eventId, userId, { status: "pending", ticketsPaid: 0 });
 }
 
 // ─── Setup / Teardown ─────────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithPoints(0);
+      const user  = await createTestUserWithTickets(0);
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -98,7 +98,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithPoints(0);
+      const user  = await createTestUserWithTickets(0);
       const agent = await loginAgent(user.email, user.password);
 
       const res = await agent
@@ -113,7 +113,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createTestEvent({ status: "scheduled" }, admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithPoints(0);
+      const user  = await createTestUserWithTickets(0);
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -140,7 +140,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithPoints(0);
+      const user  = await createTestUserWithTickets(0);
       const { registrationId } = await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -160,7 +160,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithPoints(0);
+      const user  = await createTestUserWithTickets(0);
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -186,7 +186,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithPoints(0);
+      const user  = await createTestUserWithTickets(0);
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -206,7 +206,7 @@ describe("Events Session API (ticketing flow)", () => {
     it("[2-2] 존재하지 않는 sessionId(유효 형식) → 404", async () => {
       // 세션 후속 API 는 authMiddleware 로 인증 강제. 인증된 유저가 존재하지 않는
       // sessionId 를 조회하면 서비스 레이어에서 SESSION_NOT_FOUND(404) 반환.
-      const user  = await createTestUserWithPoints(0);
+      const user  = await createTestUserWithTickets(0);
       const agent = await loginAgent(user.email, user.password);
 
       // sessionId 형식 = 20자 소문자 hex
@@ -224,7 +224,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithPoints(0);
+      const user  = await createTestUserWithTickets(0);
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -258,7 +258,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithPoints(0);
+      const user  = await createTestUserWithTickets(0);
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -297,7 +297,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithPoints(0);
+      const user  = await createTestUserWithTickets(0);
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -372,7 +372,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithPoints(0);
+      const user  = await createTestUserWithTickets(0);
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -406,7 +406,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithPoints(0);
+      const user  = await createTestUserWithTickets(0);
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -436,7 +436,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithPoints(0);
+      const user  = await createTestUserWithTickets(0);
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);

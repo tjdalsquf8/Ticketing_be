@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS public.notices (
     CHECK (kind IN ('notice', 'update', 'fix')),
   title VARCHAR(120) NOT NULL,
   href VARCHAR(500),
+  content TEXT,
   created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

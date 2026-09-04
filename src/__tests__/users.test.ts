@@ -35,8 +35,7 @@ describe("Users API", () => {
       expect(res.body.data.name).toBe(name);
       expect(res.body.data.id).toBeGreaterThan(0);
       expect(res.body.data.created_at).toBeDefined();
-      expect(typeof res.body.data.points).toBe("number");
-      expect(res.body.data.ticketBalance).toBe(res.body.data.points);
+      expect(typeof res.body.data.ticketBalance).toBe("number");
       // 비밀번호는 응답에 절대 노출 안 됨
       expect(res.body.data.password).toBeUndefined();
     });
