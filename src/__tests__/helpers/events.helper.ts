@@ -173,10 +173,7 @@ export async function cleanupTestEvents(eventIds: number[]): Promise<void> {
   if (eventIds.length === 0) return;
 
   // FK 의존 순서 (역방향 삭제):
-  //   live_seats/live_holds → event_registrations → tickets → live_sessions → events
-  // event_registrations.ticket_id → tickets(id) FK 추가 이후, tickets 삭제 전
-  // event_registrations 를 먼저 지워야 참조 위반 없음. tickets → live_sessions
-  // FK 때문에 tickets 를 live_sessions 보다 먼저.
+  //   live_seats/live_holds → event_registrations → live_sessions → events
   await pool.query(
     `DELETE FROM live_seats WHERE event_id = ANY($1::int[])`,
     [eventIds],
@@ -187,11 +184,6 @@ export async function cleanupTestEvents(eventIds: number[]): Promise<void> {
   );
   await pool.query(
     `DELETE FROM event_registrations WHERE event_id = ANY($1::int[])`,
-    [eventIds],
-  );
-  await pool.query(
-    `DELETE FROM tickets WHERE live_session_id IN
-       (SELECT id FROM live_sessions WHERE event_id = ANY($1::int[]))`,
     [eventIds],
   );
   await pool.query(
@@ -224,16 +216,9 @@ export async function cleanupTestSeries(seriesIds: number[]): Promise<void> {
 
 /** 테스트 유저 삭제 (이메일 접두어 기준) */
 export async function cleanupTestEvUsers(): Promise<void> {
-  // FK 의존 순서: event_registrations → tickets → live_sessions → events → users
-  // event_registrations.ticket_id → tickets(id) FK 추가로 event_registrations 를
-  // tickets 보다 먼저 지워야 참조 위반이 안 남.
+  // FK 의존 순서: event_registrations → live_sessions → events → users
   await pool.query(
     `DELETE FROM event_registrations
-     WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)`,
-    [`${TEST_EV_EMAIL_PREFIX}%`],
-  );
-  await pool.query(
-    `DELETE FROM tickets
      WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)`,
     [`${TEST_EV_EMAIL_PREFIX}%`],
   );

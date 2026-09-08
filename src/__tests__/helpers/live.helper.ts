@@ -41,12 +41,7 @@ export async function createTestUser(): Promise<{
 
 /** 테스트용 사용자들 일괄 삭제 (이메일 접두어 기준) */
 export async function cleanupTestLiveUsers(): Promise<void> {
-  // tickets → live_sessions → users 순서로 삭제 (FK)
-  await pool.query(
-    `DELETE FROM tickets
-     WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)`,
-    [`${TEST_LIVE_EMAIL_PREFIX}%`],
-  );
+  // live_sessions → users 순서로 삭제 (FK)
   await pool.query(
     `DELETE FROM live_sessions
      WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)`,

@@ -1,7 +1,5 @@
-import crypto from "crypto";
 import request from "supertest";
 import app from "../app";
-import pool from "../config/db";
 import { cleanupTestPracticeSessions, uniqueNickname } from "./setup";
 import {
   createTestUser,
@@ -10,38 +8,6 @@ import {
   cleanupTestRounds,
   cleanupTestLiveUsers,
 } from "./helpers/live.helper";
-
-async function insertTicket(
-  userId: number,
-  roundId: number,
-  sessionDbId: number,
-  rank: number,
-): Promise<void> {
-  const serial = crypto.randomUUID().replace(/-/g, "").substring(0, 12).toUpperCase();
-  await pool.query(
-    `INSERT INTO tickets
-       (live_session_id, user_id, round_id, event_id, passenger_nickname,
-        serial, seat_label, elapsed_ms, rank, total_participants)
-     VALUES ($1, $2, $3, NULL, 'test_nick', $4, 'A-1-1', 5000, $5, 0)`,
-    [sessionDbId, userId, roundId, serial, rank],
-  );
-}
-
-/** 유료 이벤트 티켓(round_id NULL, event_id 기준) 직접 삽입 */
-async function insertPaidEventTicket(
-  userId: number,
-  sessionDbId: number,
-  rank: number,
-): Promise<void> {
-  const serial = crypto.randomUUID().replace(/-/g, "").substring(0, 12).toUpperCase();
-  await pool.query(
-    `INSERT INTO tickets
-       (live_session_id, user_id, round_id, event_id, passenger_nickname,
-        serial, seat_label, elapsed_ms, rank, total_participants)
-     VALUES ($1, $2, NULL, NULL, 'test_nick', $3, 'A-1-1', 5000, $4, 0)`,
-    [sessionDbId, userId, serial, rank],
-  );
-}
 
 describe("Rankings API", () => {
   beforeAll(cleanupTestPracticeSessions);
@@ -89,7 +55,7 @@ describe("Rankings API", () => {
     });
   });
 
-  describe("[7] 티켓 누적 랭킹 (mode=ticket)", () => {
+  describe("[7] GET /api/rankings/me — 내 기록", () => {
     const createdRoundIds: number[] = [];
 
     afterAll(async () => {
@@ -97,54 +63,100 @@ describe("Rankings API", () => {
       await cleanupTestRounds(createdRoundIds);
     });
 
-    it("사용자별 누적 티켓 수 내림차순으로 랭킹을 반환한다", async () => {
-      const userA = await createTestUser();
-      const userB = await createTestUser();
+    async function loginAgent(email: string, password: string) {
+      const agent = request.agent(app);
+      await agent
+        .post("/api/auth/login")
+        .set("Content-Type", "application/json")
+        .send({ email, password });
+      return agent;
+    }
+
+    it("본인의 완주 기록을 시도 단위로 전부 반환한다", async () => {
+      const user = await createTestUser();
       const round1 = await createTestRound();
       const round2 = await createTestRound();
       createdRoundIds.push(round1.roundId, round2.roundId);
 
-      const sessionA1 = await insertTestSession({
+      await insertTestSession({
         roundId: round1.roundId,
-        userId: userA.userId,
+        userId: user.userId,
         status: "completed",
+        elapsedMs: 5000,
       });
-      const sessionA2 = await insertTestSession({
+      await insertTestSession({
         roundId: round2.roundId,
-        userId: userA.userId,
+        userId: user.userId,
         status: "completed",
-      });
-      const sessionB1 = await insertTestSession({
-        roundId: round1.roundId,
-        userId: userB.userId,
-        status: "completed",
+        elapsedMs: 9000,
       });
 
-      await insertTicket(userA.userId, round1.roundId, sessionA1.sessionDbId, 1);
-      await insertTicket(userA.userId, round2.roundId, sessionA2.sessionDbId, 1);
-      await insertTicket(userB.userId, round1.roundId, sessionB1.sessionDbId, 2);
-      // 유료 이벤트 티켓(round_id NULL)은 누적 랭킹 집계에서 제외되어야 함
-      await insertPaidEventTicket(userA.userId, sessionA1.sessionDbId, 1);
+      const agent = await loginAgent(user.email, user.password);
+      const res = await agent.get("/api/rankings/me?mode=live&period=daily");
 
-      const res = await request(app).get(
-        "/api/rankings?mode=ticket&page=1&size=100",
-      );
       expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(2);
+      expect(res.body.meta.totalCount).toBe(2);
 
-      const rowA = res.body.data.find(
-        (r: { userId: number }) => r.userId === userA.userId,
-      );
-      const rowB = res.body.data.find(
-        (r: { userId: number }) => r.userId === userB.userId,
-      );
-      expect(Number(rowA.ticketCount)).toBe(2);
-      expect(Number(rowB.ticketCount)).toBe(1);
-      expect(Number(rowA.rank)).toBeLessThan(Number(rowB.rank));
+      const elapsed = res.body.data.map((r: { elapsed_ms: number }) => r.elapsed_ms).sort();
+      expect(elapsed).toEqual([5000, 9000]);
+      // best_ms 는 FE 호환 필드로 그 시도의 elapsed_ms 와 같은 값
+      for (const row of res.body.data) {
+        expect(row.best_ms).toBe(row.elapsed_ms);
+        expect(row.is_verified).toBe(true);
+      }
     });
 
-    it("period 없이 요청해도 400이 아니다", async () => {
-      const res = await request(app).get("/api/rankings?mode=ticket");
+    it("랭킹 상위권 밖 기록도 rank 와 함께 반환한다", async () => {
+      const me = await createTestUser();
+      const round = await createTestRound();
+      createdRoundIds.push(round.roundId);
+
+      // 나보다 빠른 참가자 3명
+      for (let i = 1; i <= 3; i++) {
+        const faster = await createTestUser();
+        await insertTestSession({
+          roundId: round.roundId,
+          userId: faster.userId,
+          status: "completed",
+          elapsedMs: i * 100,
+        });
+      }
+      await insertTestSession({
+        roundId: round.roundId,
+        userId: me.userId,
+        status: "completed",
+        elapsedMs: 90000,
+      });
+
+      const agent = await loginAgent(me.email, me.password);
+      const res = await agent.get("/api/rankings/me?mode=live&period=daily");
+
       expect(res.status).toBe(200);
+      const mine = res.body.data.find(
+        (r: { elapsed_ms: number }) => r.elapsed_ms === 90000,
+      );
+      expect(mine).toBeDefined();
+      // 나보다 빠른 사람이 최소 3명이므로 4위 이하. rank 는 number 여야 한다.
+      expect(typeof mine.rank).toBe("number");
+      expect(mine.rank).toBeGreaterThanOrEqual(4);
+    });
+
+    it("미인증 요청은 401", async () => {
+      const res = await request(app).get("/api/rankings/me?mode=live&period=daily");
+      expect(res.status).toBe(401);
+    });
+
+    it("잘못된 period 는 422", async () => {
+      const user = await createTestUser();
+      const agent = await loginAgent(user.email, user.password);
+      const res = await agent.get("/api/rankings/me?mode=live&period=yearly");
+      expect(res.status).toBe(422);
+    });
+
+    it("mode=ticket 은 더 이상 지원하지 않는다 (422)", async () => {
+      const res = await request(app).get("/api/rankings?mode=ticket&period=daily");
+      expect(res.status).toBe(422);
     });
   });
 });

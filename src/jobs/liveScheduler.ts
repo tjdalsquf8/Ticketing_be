@@ -134,7 +134,6 @@ const sweepExpiredHolds = async (): Promise<void> => {
  * closed 전이 직후 처리:
  * 1. 잔여 seat_holds 삭제 + 좌석 held → available 복구.
  * 2. 해당 round 의 active/queued 세션 → failed.
- * 3. tickets.total_participants 를 실제 completed 세션 수로 백필.
  *
  * transitionRounds() 와 같은 타이밍 크론(TRANSITION_SCHEDULE)에 이어 실행한다.
  */
@@ -172,17 +171,6 @@ const finalizeClosedRounds = async (): Promise<void> => {
       await client.query(
         `UPDATE live_sessions SET status = 'failed'
          WHERE round_id = $1 AND status IN ('active', 'queued')`,
-        [roundId],
-      );
-
-      // total_participants 백필 (completed 세션 수 기준)
-      await client.query(
-        `UPDATE tickets t
-         SET total_participants = (
-           SELECT COUNT(*) FROM live_sessions
-           WHERE round_id = $1 AND status = 'completed'
-         )
-         WHERE t.round_id = $1`,
         [roundId],
       );
 

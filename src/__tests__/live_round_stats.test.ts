@@ -113,8 +113,8 @@ describe("GET /api/admin/live/rounds/:roundId/stats", () => {
     // registered: 세션 수 = 2
     expect(data.registered).toBe(2);
 
-    // ticketed: tickets 테이블 기준 → 직접 삽입 없으므로 0
-    expect(data.ticketed).toBe(0);
+    // completed: 완주 세션 수 (userA 만 completed)
+    expect(data.completed).toBe(1);
 
     // noShow: completed 아닌 세션 = 1 (userB)
     expect(data.noShow).toBe(1);
@@ -124,14 +124,14 @@ describe("GET /api/admin/live/rounds/:roundId/stats", () => {
 
     // 타입 검증
     expect(typeof data.registered).toBe("number");
-    expect(typeof data.ticketed).toBe("number");
+    expect(typeof data.completed).toBe("number");
     expect(typeof data.noShow).toBe("number");
     expect(typeof data.netRevenue).toBe("number");
   });
 
   // ─── [1-2] 세션 없는 라운드 → 0 값 ────────────────────────────────────────────
 
-  it("[1-2] 세션이 없는 라운드 → registered/ticketed/noShow 모두 0", async () => {
+  it("[1-2] 세션이 없는 라운드 → registered/completed/noShow 모두 0", async () => {
     const { roundId } = await createTestRound({
       status: "closed",
       opensOffsetSeconds: -400,
@@ -146,7 +146,7 @@ describe("GET /api/admin/live/rounds/:roundId/stats", () => {
     expect(res.status).toBe(200);
     const data = res.body.data;
     expect(data.registered).toBe(0);
-    expect(data.ticketed).toBe(0);
+    expect(data.completed).toBe(0);
     expect(data.noShow).toBe(0);
     expect(data.netRevenue).toBe(0);
   });

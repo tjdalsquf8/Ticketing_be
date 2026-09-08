@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict Z4ezU2SfUXow5ExPPTo0hzpZOTKfvH1IfAUychdX8VKSrpyDdhgcNtcDoPrLe1l
+\restrict pqfLs6VHRLphudg2ltC4mwubAG5Mx67goINDHxDiSyFNi3WYFqJIuURPznF8Hr8
 
 -- Dumped from database version 16.13 (Postgres.app)
 -- Dumped by pg_dump version 18.4
@@ -31,12 +31,11 @@ CREATE TABLE public.event_registrations (
     id integer NOT NULL,
     event_id integer NOT NULL,
     user_id integer NOT NULL,
-    tickets_paid integer DEFAULT 0 NOT NULL,
     registered_at timestamp with time zone DEFAULT now() NOT NULL,
     status character varying(16) DEFAULT 'pending'::character varying NOT NULL,
-    ticket_id integer,
     cancelled_at timestamp with time zone,
     refunded_at timestamp with time zone,
+    tickets_paid integer DEFAULT 0 NOT NULL,
     refund_tickets integer,
     CONSTRAINT event_registrations_refund_tickets_check CHECK ((refund_tickets >= 0)),
     CONSTRAINT event_registrations_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'entered'::character varying, 'ticketed'::character varying, 'missed'::character varying, 'no_show'::character varying, 'cancelled'::character varying, 'refunded'::character varying])::text[]))),
@@ -74,7 +73,6 @@ CREATE TABLE public.event_series (
     category character varying(20) NOT NULL,
     venue_id integer NOT NULL,
     duration_ms integer DEFAULT 300000 NOT NULL,
-    entry_fee_tickets integer DEFAULT 500 NOT NULL,
     prize character varying(120) NOT NULL,
     poster_color character varying(7) NOT NULL,
     poster_initial character varying(8) DEFAULT ''::character varying NOT NULL,
@@ -82,6 +80,7 @@ CREATE TABLE public.event_series (
     created_by integer NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    entry_fee_tickets integer DEFAULT 500 NOT NULL,
     CONSTRAINT event_series_category_check CHECK (((category)::text = ANY ((ARRAY['concert'::character varying, 'musical'::character varying, 'sports'::character varying, 'theater'::character varying, 'festival'::character varying])::text[]))),
     CONSTRAINT event_series_entry_fee_tickets_check CHECK (((entry_fee_tickets >= 0) AND (entry_fee_tickets <= 100000)))
 );
@@ -121,7 +120,6 @@ CREATE TABLE public.events (
     opens_at timestamp with time zone NOT NULL,
     closes_at timestamp with time zone NOT NULL,
     duration_ms integer DEFAULT 300000 NOT NULL,
-    entry_fee_tickets integer DEFAULT 500 NOT NULL,
     registration_deadline timestamp with time zone NOT NULL,
     prize character varying(120) NOT NULL,
     poster_color character varying(7) NOT NULL,
@@ -135,6 +133,7 @@ CREATE TABLE public.events (
     cancelled_at timestamp with time zone,
     cancel_reason text,
     hidden_at timestamp with time zone,
+    entry_fee_tickets integer DEFAULT 500 NOT NULL,
     CONSTRAINT events_category_check CHECK (((category)::text = ANY ((ARRAY['concert'::character varying, 'musical'::character varying, 'sports'::character varying, 'theater'::character varying, 'festival'::character varying])::text[]))),
     CONSTRAINT events_entry_fee_tickets_check CHECK (((entry_fee_tickets >= 0) AND (entry_fee_tickets <= 100000))),
     CONSTRAINT events_opens_closes_check CHECK ((opens_at < closes_at)),
@@ -171,9 +170,9 @@ ALTER SEQUENCE public.events_id_seq OWNED BY public.events.id;
 
 CREATE TABLE public.gifticon_settlements (
     id integer NOT NULL,
-    ticket_id integer NOT NULL,
     gifticon_id integer NOT NULL,
-    issued_at timestamp with time zone DEFAULT now() NOT NULL
+    issued_at timestamp with time zone DEFAULT now() NOT NULL,
+    live_session_id integer NOT NULL
 );
 
 
@@ -581,47 +580,6 @@ ALTER SEQUENCE public.practice_sessions_id_seq OWNED BY public.practice_sessions
 
 
 --
--- Name: tickets; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.tickets (
-    id integer NOT NULL,
-    live_session_id integer NOT NULL,
-    user_id integer NOT NULL,
-    round_id integer,
-    event_id integer,
-    passenger_nickname character varying(30) NOT NULL,
-    serial character varying(32) NOT NULL,
-    stub_no character varying(16),
-    seat_label character varying(32) NOT NULL,
-    elapsed_ms integer NOT NULL,
-    rank smallint NOT NULL,
-    total_participants integer NOT NULL,
-    issued_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: tickets_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.tickets_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: tickets_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.tickets_id_seq OWNED BY public.tickets.id;
-
-
---
 -- Name: users; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -796,13 +754,6 @@ ALTER TABLE ONLY public.practice_sessions ALTER COLUMN id SET DEFAULT nextval('p
 
 
 --
--- Name: tickets id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tickets ALTER COLUMN id SET DEFAULT nextval('public.tickets_id_seq'::regclass);
-
-
---
 -- Name: users id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -849,19 +800,19 @@ ALTER TABLE ONLY public.gifticon_settlements
 
 
 --
+-- Name: gifticon_settlements gifticon_settlements_live_session_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.gifticon_settlements
+    ADD CONSTRAINT gifticon_settlements_live_session_id_key UNIQUE (live_session_id);
+
+
+--
 -- Name: gifticon_settlements gifticon_settlements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.gifticon_settlements
     ADD CONSTRAINT gifticon_settlements_pkey PRIMARY KEY (id);
-
-
---
--- Name: gifticon_settlements gifticon_settlements_ticket_id_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.gifticon_settlements
-    ADD CONSTRAINT gifticon_settlements_ticket_id_key UNIQUE (ticket_id);
 
 
 --
@@ -1022,30 +973,6 @@ ALTER TABLE ONLY public.practice_sessions
 
 ALTER TABLE ONLY public.practice_sessions
     ADD CONSTRAINT practice_sessions_session_id_key UNIQUE (session_id);
-
-
---
--- Name: tickets tickets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tickets
-    ADD CONSTRAINT tickets_pkey PRIMARY KEY (id);
-
-
---
--- Name: tickets tickets_serial_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tickets
-    ADD CONSTRAINT tickets_serial_key UNIQUE (serial);
-
-
---
--- Name: tickets uq_tickets_round_rank; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tickets
-    ADD CONSTRAINT uq_tickets_round_rank UNIQUE (round_id, rank);
 
 
 --
@@ -1228,6 +1155,20 @@ CREATE INDEX idx_live_seats_round_status ON public.live_seats USING btree (round
 
 
 --
+-- Name: idx_live_sessions_completed_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_live_sessions_completed_at ON public.live_sessions USING btree (completed_at) WHERE ((status)::text = 'completed'::text);
+
+
+--
+-- Name: idx_live_sessions_event_elapsed; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_live_sessions_event_elapsed ON public.live_sessions USING btree (event_id, elapsed_ms) WHERE ((event_id IS NOT NULL) AND ((status)::text = 'completed'::text));
+
+
+--
 -- Name: idx_live_sessions_event_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1249,6 +1190,13 @@ CREATE INDEX idx_live_sessions_round_status ON public.live_sessions USING btree 
 
 
 --
+-- Name: idx_live_sessions_user_started; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_live_sessions_user_started ON public.live_sessions USING btree (user_id, started_at DESC) WHERE (user_id IS NOT NULL);
+
+
+--
 -- Name: idx_live_waiting_round; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1263,24 +1211,10 @@ CREATE INDEX idx_notices_created_at ON public.notices USING btree (created_at DE
 
 
 --
--- Name: idx_tickets_event; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_practice_sessions_user_started; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_tickets_event ON public.tickets USING btree (event_id) WHERE (round_id IS NULL);
-
-
---
--- Name: idx_tickets_round; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_tickets_round ON public.tickets USING btree (round_id);
-
-
---
--- Name: idx_tickets_user_issued; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_tickets_user_issued ON public.tickets USING btree (user_id, issued_at DESC);
+CREATE INDEX idx_practice_sessions_user_started ON public.practice_sessions USING btree (user_id, started_at DESC) WHERE (user_id IS NOT NULL);
 
 
 --
@@ -1347,26 +1281,11 @@ CREATE UNIQUE INDEX uq_live_sessions_round_user_active ON public.live_sessions U
 
 
 --
--- Name: uq_tickets_event_rank; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_tickets_event_rank ON public.tickets USING btree (event_id, rank) WHERE (round_id IS NULL);
-
-
---
 -- Name: event_registrations event_registrations_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.event_registrations
     ADD CONSTRAINT event_registrations_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.events(id) ON DELETE RESTRICT;
-
-
---
--- Name: event_registrations event_registrations_ticket_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.event_registrations
-    ADD CONSTRAINT event_registrations_ticket_id_fkey FOREIGN KEY (ticket_id) REFERENCES public.tickets(id) ON DELETE RESTRICT;
 
 
 --
@@ -1426,11 +1345,11 @@ ALTER TABLE ONLY public.gifticon_settlements
 
 
 --
--- Name: gifticon_settlements gifticon_settlements_ticket_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: gifticon_settlements gifticon_settlements_live_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.gifticon_settlements
-    ADD CONSTRAINT gifticon_settlements_ticket_id_fkey FOREIGN KEY (ticket_id) REFERENCES public.tickets(id) ON DELETE CASCADE;
+    ADD CONSTRAINT gifticon_settlements_live_session_id_fkey FOREIGN KEY (live_session_id) REFERENCES public.live_sessions(id) ON DELETE CASCADE;
 
 
 --
@@ -1570,32 +1489,8 @@ ALTER TABLE ONLY public.practice_sessions
 
 
 --
--- Name: tickets tickets_live_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tickets
-    ADD CONSTRAINT tickets_live_session_id_fkey FOREIGN KEY (live_session_id) REFERENCES public.live_sessions(id) ON DELETE CASCADE;
-
-
---
--- Name: tickets tickets_round_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tickets
-    ADD CONSTRAINT tickets_round_id_fkey FOREIGN KEY (round_id) REFERENCES public.live_rounds(id) ON DELETE CASCADE;
-
-
---
--- Name: tickets tickets_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.tickets
-    ADD CONSTRAINT tickets_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
-
-
---
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Z4ezU2SfUXow5ExPPTo0hzpZOTKfvH1IfAUychdX8VKSrpyDdhgcNtcDoPrLe1l
+\unrestrict pqfLs6VHRLphudg2ltC4mwubAG5Mx67goINDHxDiSyFNi3WYFqJIuURPznF8Hr8
 

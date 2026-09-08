@@ -578,11 +578,12 @@ export interface EventRankingRow {
 
 /**
  * 마지막으로 진행된(closed) 이벤트 하나의 참여자 랭킹.
- * closes_at DESC 로 가장 최근 종료 이벤트를 찾아 tickets 를 rank ASC 정렬해 반환.
+ * closes_at DESC 로 가장 최근 종료 이벤트를 찾아 완주 세션을 빠른 순으로 반환.
  * 종료된 이벤트가 없으면 event=null, rankings=[] 반환.
  *
- * `tickets.event_id IS NOT NULL AND round_id IS NULL` 조건으로 라이브 라운드
- * 티켓과 이벤트 티켓을 구분한다 (라이브 티켓은 round_id 를 가짐).
+ * 정렬 기준(elapsed_ms ASC, completed_at ASC)은 기프티콘 정산의 TOP3 판정
+ * (settlements.service.ts SETTLEMENT_BASE_CTE)과 반드시 일치해야 한다.
+ * 어긋나면 화면에 3등으로 보이는 사람과 실제 지급 대상이 달라진다.
  */
 async function getLatestClosedEventRankings(
   limit: number,
@@ -606,21 +607,21 @@ async function getLatestClosedEventRankings(
 
   const event = mapEvent(evRes.rows[0]);
 
-  const ticketsRes = await pool.query(
-    `SELECT rank, passenger_nickname, seat_label, elapsed_ms, issued_at
-     FROM public.tickets
-     WHERE event_id = $1 AND round_id IS NULL
-     ORDER BY rank ASC
+  const sessionsRes = await pool.query(
+    `SELECT nickname, seat_label, elapsed_ms, completed_at
+     FROM public.live_sessions
+     WHERE event_id = $1 AND status = 'completed'
+     ORDER BY elapsed_ms ASC, completed_at ASC
      LIMIT $2`,
     [event.eventId, limit],
   );
 
-  const rankings: EventRankingRow[] = ticketsRes.rows.map((r) => ({
-    rank:       r.rank as number,
-    nickname:   r.passenger_nickname as string,
+  const rankings: EventRankingRow[] = sessionsRes.rows.map((r, index) => ({
+    rank:       index + 1,
+    nickname:   r.nickname as string,
     seatLabel:  r.seat_label as string,
     elapsedMs:  r.elapsed_ms as number,
-    ticketedAt: (r.issued_at as Date).toISOString(),
+    ticketedAt: (r.completed_at as Date).toISOString(),
   }));
 
   return { event, rankings };
