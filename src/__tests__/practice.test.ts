@@ -117,8 +117,8 @@ describe("Practice API", () => {
       expect(completeRes.status).toBe(200);
       expect(completeRes.body.data.ranked).toBe(false);
       expect(completeRes.body.data.rankPercentile).toBeNull();
-      expect(completeRes.body.data.rankNumber).toBeNull();
-      expect(completeRes.body.data.totalCount).toBeNull();
+      expect(completeRes.body.data.sessionRank).toBeNull();
+      expect(completeRes.body.data.totalSessions).toBeNull();
       // 시간은 정상 반환
       expect(typeof completeRes.body.data.elapsedMs).toBe("number");
     });
@@ -141,8 +141,34 @@ describe("Practice API", () => {
       expect(completeRes.status).toBe(200);
       expect(completeRes.body.data.ranked).toBe(true);
       expect(typeof completeRes.body.data.rankPercentile).toBe("number");
-      expect(typeof completeRes.body.data.rankNumber).toBe("number");
-      expect(typeof completeRes.body.data.totalCount).toBe("number");
+      expect(typeof completeRes.body.data.sessionRank).toBe("number");
+      expect(typeof completeRes.body.data.totalSessions).toBe("number");
+    });
+
+    it("같은 게스트가 반복 완료하면 totalSessions 가 매번 증가한다", async () => {
+      // 회귀 방지: 예전에는 참가자별로 dedup 해서 같은 사람이 몇 번을 돌려도
+      // 값이 참가자 수에 고정됐다.
+      const nickname = uniqueNickname();
+      const agent = request.agent(app);
+
+      const counts: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        const startRes = await agent
+          .post("/api/practice/sessions")
+          .set("Content-Type", "application/json")
+          .send({ mode: "practice", nickname });
+
+        const completeRes = await agent
+          .post(`/api/practice/sessions/${startRes.body.data.sessionId}/complete`)
+          .set("Content-Type", "application/json")
+          .send({});
+
+        expect(completeRes.status).toBe(200);
+        counts.push(completeRes.body.data.totalSessions);
+      }
+
+      expect(counts[1]).toBe(counts[0] + 1);
+      expect(counts[2]).toBe(counts[1] + 1);
     });
   });
 
