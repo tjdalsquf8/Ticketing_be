@@ -163,6 +163,20 @@ const runCron = async (
   }
 };
 
+// POST /api/admin/live/rounds/create-now — 임시(테스트용): 정각 대기 없이 즉시 open 회차 생성
+const createRoundNow = async (
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const data = await adminService.createRoundNow();
+    res.status(201).json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export {
   getLiveConfig,
   putLiveConfigVenue,
@@ -172,4 +186,5 @@ export {
   getRoundDetail,
   getRoundStats,
   runCron,
+  createRoundNow,
 };
