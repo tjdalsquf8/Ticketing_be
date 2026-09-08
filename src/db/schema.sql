@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict fvcfZbZ3ZjQJ5cPt1rXWGRVzUckfo4NK4RmMkpyNVB2pHrtUCGCMVkZxkQJQR3z
+\restrict Z4ezU2SfUXow5ExPPTo0hzpZOTKfvH1IfAUychdX8VKSrpyDdhgcNtcDoPrLe1l
 
 -- Dumped from database version 16.13 (Postgres.app)
 -- Dumped by pg_dump version 18.4
@@ -671,6 +671,7 @@ CREATE TABLE public.venues (
     thumbnail_url character varying(500),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     slug character varying(50) NOT NULL,
+    config jsonb NOT NULL,
     CONSTRAINT venues_layout_check CHECK (((layout)::text = ANY ((ARRAY['arena-ring'::character varying, 'baseball'::character varying, 'stadium-oval'::character varying, 'proscenium'::character varying, 'festival'::character varying, 'auditorium'::character varying])::text[]))),
     CONSTRAINT venues_total_seats_check CHECK ((total_seats > 0))
 );
@@ -1596,5 +1597,5 @@ ALTER TABLE ONLY public.tickets
 -- PostgreSQL database dump complete
 --
 
-\unrestrict fvcfZbZ3ZjQJ5cPt1rXWGRVzUckfo4NK4RmMkpyNVB2pHrtUCGCMVkZxkQJQR3z
+\unrestrict Z4ezU2SfUXow5ExPPTo0hzpZOTKfvH1IfAUychdX8VKSrpyDdhgcNtcDoPrLe1l
 
