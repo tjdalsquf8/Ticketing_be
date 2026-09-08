@@ -1,6 +1,7 @@
 import pool from "../config/db";
 import { AppError } from "../middlewares/errorHandler";
 import { ROUND_DURATION_MINUTES } from "./live.service";
+import { scheduleRoundClose } from "../jobs/liveScheduler";
 
 // ─── Live Config ─────────────────────────────────────────────
 
@@ -311,6 +312,11 @@ const createRoundNow = async (): Promise<RoundListRow> => {
     );
 
     await client.query("COMMIT");
+
+    // 정각 회차용 크론은 매시 :00 과 :ROUND_DURATION_MINUTES 에만 발화한다.
+    // 임의 시각에 만든 이 회차는 그 사이에 끝나므로 종료 타이머를 따로 걸어준다.
+    scheduleRoundClose(round.id, new Date(round.closes_at));
+
     return { ...mapRoundRow(round), participantCount: 0 };
   } catch (err) {
     await client.query("ROLLBACK");
