@@ -145,6 +145,32 @@ describe("Practice API", () => {
       expect(typeof completeRes.body.data.totalSessions).toBe("number");
     });
 
+    it("rankPercentile 은 등수 비율(상위 %)이다", async () => {
+      // 회귀 방지: 예전에는 "나보다 느린 시도의 비율" 을 돌려줘서 1등이 상위 99% 로
+      // 표시됐다. 프론트가 이 값을 "상위 N%" 로 그대로 쓰므로 등수 비율이어야 한다.
+      const agent = request.agent(app);
+
+      const startRes = await agent
+        .post("/api/practice/sessions")
+        .set("Content-Type", "application/json")
+        .send({ mode: "practice", nickname: uniqueNickname() });
+
+      const completeRes = await agent
+        .post(`/api/practice/sessions/${startRes.body.data.sessionId}/complete`)
+        .set("Content-Type", "application/json")
+        .send({});
+
+      expect(completeRes.status).toBe(200);
+      const { rankPercentile, sessionRank, totalSessions } = completeRes.body.data;
+
+      expect(rankPercentile).toBeCloseTo(
+        Math.round((sessionRank / totalSessions) * 1000) / 10,
+        5,
+      );
+      expect(rankPercentile).toBeGreaterThan(0);
+      expect(rankPercentile).toBeLessThanOrEqual(100);
+    });
+
     it("같은 게스트가 반복 완료하면 totalSessions 가 매번 증가한다", async () => {
       // 회귀 방지: 예전에는 참가자별로 dedup 해서 같은 사람이 몇 번을 돌려도
       // 값이 참가자 수에 고정됐다.

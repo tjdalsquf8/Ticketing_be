@@ -179,8 +179,11 @@ const completeSession = async (params: {
   // 나보다 느린 시도를 전체에서 뺀 값 = 나와 같거나 빠른 시도 수 = 내 등수.
   // 이 세션은 위에서 이미 completed 로 갱신됐으므로 집계에 포함된다.
   const sessionRank = totalSessions - Number(slower);
+  // 상위 몇 %인지. 프론트가 "상위 N%" 로 그대로 표시하므로 등수 비율이어야 한다.
+  // 예전에는 slower/total, 즉 "내가 이긴 시도의 비율" 을 돌려줘서 1등이 상위 99% 로
+  // 표시되는 정반대 값이 나갔다. 값이 작을수록 좋은 기록이다.
   const rankPercentile =
-    totalSessions > 0 ? Math.round((Number(slower) / totalSessions) * 1000) / 10 : 0;
+    totalSessions > 0 ? Math.round((sessionRank / totalSessions) * 1000) / 10 : 0;
 
   return { elapsedMs, ranked: true, rankPercentile, sessionRank, totalSessions };
 };
