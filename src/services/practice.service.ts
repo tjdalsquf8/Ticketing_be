@@ -138,8 +138,8 @@ const completeSession = async (params: {
       elapsedMs,
       ranked: false,
       rankPercentile: null,
-      rankNumber: null,
-      totalCount: null,
+      sessionRank: null,
+      totalSessions: null,
     };
   }
 
@@ -153,29 +153,39 @@ const completeSession = async (params: {
         })()
       : "AND event_id IS NULL";
 
+  // 완료 팝업의 등수는 **시도(세션) 누적** 기준이다. 같은 사람이 여러 번 참여하면
+  // 그 시도들이 각각 별개로 카운트된다.
+  //
+  // 예전에는 여기서 `GROUP BY COALESCE(user_id::text, guest_uuid)` 로 참가자별
+  // 개인 최고기록 한 줄씩만 남겼다. 그래서 같은 게스트가 몇 번을 반복해도
+  // totalCount 가 참가자 수에 고정돼 "안 늘어나는" 것처럼 보였다.
+  //
+  // 리더보드(GET /rankings)는 여전히 참가자별 개인 최고기록으로 dedup 한다.
+  // 목적이 다른 지표이므로 두 곳의 기준이 다른 것이 의도된 동작이다.
   const rank = await pool.query(
     `SELECT
-       COUNT(*) FILTER (WHERE best_ms > $1) AS slower,
+       COUNT(*) FILTER (WHERE elapsed_ms > $1) AS slower,
        COUNT(*) AS total
-     FROM (
-       SELECT MIN(elapsed_ms) AS best_ms
-       FROM practice_sessions
-       WHERE completed_at IS NOT NULL
-         AND mode = $2
-         AND ranking_eligible = true
-         ${eventFilter}
-       GROUP BY COALESCE(user_id::text, guest_uuid)
-     ) best_records`,
+     FROM practice_sessions
+     WHERE completed_at IS NOT NULL
+       AND mode = $2
+       AND ranking_eligible = true
+       ${eventFilter}`,
     rankParams,
   );
 
   const { slower, total } = rank.rows[0];
-  const totalCount = Number(total);
-  const rankNumber = totalCount - Number(slower);
+  const totalSessions = Number(total);
+  // 나보다 느린 시도를 전체에서 뺀 값 = 나와 같거나 빠른 시도 수 = 내 등수.
+  // 이 세션은 위에서 이미 completed 로 갱신됐으므로 집계에 포함된다.
+  const sessionRank = totalSessions - Number(slower);
+  // 상위 몇 %인지. 프론트가 "상위 N%" 로 그대로 표시하므로 등수 비율이어야 한다.
+  // 예전에는 slower/total, 즉 "내가 이긴 시도의 비율" 을 돌려줘서 1등이 상위 99% 로
+  // 표시되는 정반대 값이 나갔다. 값이 작을수록 좋은 기록이다.
   const rankPercentile =
-    totalCount > 0 ? Math.round((Number(slower) / totalCount) * 1000) / 10 : 0;
+    totalSessions > 0 ? Math.round((sessionRank / totalSessions) * 1000) / 10 : 0;
 
-  return { elapsedMs, ranked: true, rankPercentile, rankNumber, totalCount };
+  return { elapsedMs, ranked: true, rankPercentile, sessionRank, totalSessions };
 };
 
 export { startSession, completeSession };
