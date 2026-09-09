@@ -206,7 +206,6 @@ export interface RoundStatsRow {
   registered: number;
   completed: number;
   noShow: number;
-  netRevenue: number;
 }
 
 /**
@@ -217,7 +216,6 @@ export interface RoundStatsRow {
  *   completed  — 좌석 확정까지 완주한 세션 수.
  *   noShow     — active 진입 후 좌석 확정 못 한 세션 수
  *                (live_sessions.status != 'completed' — queued/active/failed 포함).
- *   netRevenue — 라이브는 참가비 없으므로 항상 0.
  *
  * 라이브 세션은 completed = 좌석 확정 완료. 그 외 상태는 좌석을 못 잡은 것.
  */
@@ -256,7 +254,6 @@ const getRoundStats = async (roundId: number): Promise<RoundStatsRow> => {
     registered: parseInt(sRow.registered, 10),
     completed:  parseInt(sRow.completed,  10),
     noShow:     parseInt(sRow.no_show,    10),
-    netRevenue: 0,
   };
 };
 

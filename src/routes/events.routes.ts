@@ -77,7 +77,7 @@ router.get(
 );
 
 // ─── 사전 신청 (회원 전용) ───────────────────────────────────────────────────
-// eventActionLimiter: 포인트 차감·상태 변경 동반. 유저 기반 10/min 엄격 제한.
+// eventActionLimiter: 신청 상태 변경 동반. 유저 기반 10/min 엄격 제한.
 
 // POST /api/events/:eventId/registrations
 router.post(
@@ -86,15 +86,6 @@ router.post(
   eventActionLimiter,
   eventIdParamValidator,
   eventsController.registerEvent,
-);
-
-// DELETE /api/events/:eventId/registrations/me
-router.delete(
-  "/:eventId/registrations/me",
-  authMiddleware,
-  eventActionLimiter,
-  eventIdParamValidator,
-  eventsController.cancelMyRegistration,
 );
 
 // ─── 티켓팅 세션 (섹션 5) ────────────────────────────────────────────────────

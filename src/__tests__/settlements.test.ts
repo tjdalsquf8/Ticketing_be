@@ -11,7 +11,7 @@ import app from "../app";
 import pool from "../config/db";
 import {
   createAdminUser,
-  createTestUserWithTickets,
+  createTestUser,
   createTestEvent,
   cleanupTestEvents,
   cleanupTestEvUsers,
@@ -97,7 +97,7 @@ async function insertGifticon(opts: {
 beforeAll(async () => {
   await cleanupTestEvUsers();
   admin = await createAdminUser();
-  normalUser = await createTestUserWithTickets(10000);
+  normalUser = await createTestUser();
   adminAgent = await loginAgent(admin.email, admin.password);
   normalAgent = await loginAgent(normalUser.email, normalUser.password);
 });
@@ -128,9 +128,9 @@ describe("Settlements (Gifticons) API", () => {
       const eventId = await createClosedEvent();
 
       const first  = await insertEventFinisher({ userId: normalUser.userId, eventId, elapsedMs: 1000 });
-      const u2 = await createTestUserWithTickets(0);
-      const u3 = await createTestUserWithTickets(0);
-      const u4 = await createTestUserWithTickets(0);
+      const u2 = await createTestUser();
+      const u3 = await createTestUser();
+      const u4 = await createTestUser();
       await insertEventFinisher({ userId: u2.userId, eventId, elapsedMs: 2000 });
       await insertEventFinisher({ userId: u3.userId, eventId, elapsedMs: 3000 });
       const fourth = await insertEventFinisher({ userId: u4.userId, eventId, elapsedMs: 4000 });
@@ -188,7 +188,7 @@ describe("Settlements (Gifticons) API", () => {
 
       await insertEventFinisher({ userId: normalUser.userId, eventId, elapsedMs: 5000 });
       for (let i = 0; i < 3; i++) {
-        const u = await createTestUserWithTickets(0);
+        const u = await createTestUser();
         await insertEventFinisher({ userId: u.userId, eventId, elapsedMs: 5000 });
       }
 
@@ -268,9 +268,9 @@ describe("Settlements (Gifticons) API", () => {
     it("[2-4] TOP3가 아닌 참가자(4위)는 정산 대상 아님 → 404", async () => {
       const eventId = await createClosedEvent();
       await insertEventFinisher({ userId: normalUser.userId, eventId, elapsedMs: 1000 });
-      const u2 = await createTestUserWithTickets(0);
-      const u3 = await createTestUserWithTickets(0);
-      const u4 = await createTestUserWithTickets(0);
+      const u2 = await createTestUser();
+      const u3 = await createTestUser();
+      const u4 = await createTestUser();
       await insertEventFinisher({ userId: u2.userId, eventId, elapsedMs: 2000 });
       await insertEventFinisher({ userId: u3.userId, eventId, elapsedMs: 3000 });
       const fourth = await insertEventFinisher({ userId: u4.userId, eventId, elapsedMs: 4000 });

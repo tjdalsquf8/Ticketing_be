@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict pqfLs6VHRLphudg2ltC4mwubAG5Mx67goINDHxDiSyFNi3WYFqJIuURPznF8Hr8
+\restrict zPgWL4VBjm8ZnuvnD0VEF5JHn4RyEfJ4Cm4qOfJ7ikinOwUdyQ1en1blBXRfv6d
 
 -- Dumped from database version 16.13 (Postgres.app)
 -- Dumped by pg_dump version 18.4
@@ -34,12 +34,7 @@ CREATE TABLE public.event_registrations (
     registered_at timestamp with time zone DEFAULT now() NOT NULL,
     status character varying(16) DEFAULT 'pending'::character varying NOT NULL,
     cancelled_at timestamp with time zone,
-    refunded_at timestamp with time zone,
-    tickets_paid integer DEFAULT 0 NOT NULL,
-    refund_tickets integer,
-    CONSTRAINT event_registrations_refund_tickets_check CHECK ((refund_tickets >= 0)),
-    CONSTRAINT event_registrations_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'entered'::character varying, 'ticketed'::character varying, 'missed'::character varying, 'no_show'::character varying, 'cancelled'::character varying, 'refunded'::character varying])::text[]))),
-    CONSTRAINT event_registrations_tickets_paid_check CHECK ((tickets_paid >= 0))
+    CONSTRAINT event_registrations_status_check CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('entered'::character varying)::text, ('ticketed'::character varying)::text, ('missed'::character varying)::text, ('no_show'::character varying)::text, ('cancelled'::character varying)::text])))
 );
 
 
@@ -80,9 +75,7 @@ CREATE TABLE public.event_series (
     created_by integer NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    entry_fee_tickets integer DEFAULT 500 NOT NULL,
-    CONSTRAINT event_series_category_check CHECK (((category)::text = ANY ((ARRAY['concert'::character varying, 'musical'::character varying, 'sports'::character varying, 'theater'::character varying, 'festival'::character varying])::text[]))),
-    CONSTRAINT event_series_entry_fee_tickets_check CHECK (((entry_fee_tickets >= 0) AND (entry_fee_tickets <= 100000)))
+    CONSTRAINT event_series_category_check CHECK (((category)::text = ANY ((ARRAY['concert'::character varying, 'musical'::character varying, 'sports'::character varying, 'theater'::character varying, 'festival'::character varying])::text[])))
 );
 
 
@@ -133,9 +126,7 @@ CREATE TABLE public.events (
     cancelled_at timestamp with time zone,
     cancel_reason text,
     hidden_at timestamp with time zone,
-    entry_fee_tickets integer DEFAULT 500 NOT NULL,
     CONSTRAINT events_category_check CHECK (((category)::text = ANY ((ARRAY['concert'::character varying, 'musical'::character varying, 'sports'::character varying, 'theater'::character varying, 'festival'::character varying])::text[]))),
-    CONSTRAINT events_entry_fee_tickets_check CHECK (((entry_fee_tickets >= 0) AND (entry_fee_tickets <= 100000))),
     CONSTRAINT events_opens_closes_check CHECK ((opens_at < closes_at)),
     CONSTRAINT events_registered_count_check CHECK ((registered_count >= 0)),
     CONSTRAINT events_status_check CHECK (((status)::text = ANY ((ARRAY['scheduled'::character varying, 'open'::character varying, 'closed'::character varying, 'cancelled'::character varying])::text[]))),
@@ -591,9 +582,7 @@ CREATE TABLE public.users (
     created_at timestamp without time zone DEFAULT now(),
     refresh_token_hash character(64),
     role character varying(16) DEFAULT 'user'::character varying NOT NULL,
-    tickets integer DEFAULT 0 NOT NULL,
-    CONSTRAINT users_role_check CHECK (((role)::text = ANY ((ARRAY['user'::character varying, 'admin'::character varying])::text[]))),
-    CONSTRAINT users_tickets_check CHECK ((tickets >= 0))
+    CONSTRAINT users_role_check CHECK (((role)::text = ANY ((ARRAY['user'::character varying, 'admin'::character varying])::text[])))
 );
 
 
@@ -1492,5 +1481,5 @@ ALTER TABLE ONLY public.practice_sessions
 -- PostgreSQL database dump complete
 --
 
-\unrestrict pqfLs6VHRLphudg2ltC4mwubAG5Mx67goINDHxDiSyFNi3WYFqJIuURPznF8Hr8
+\unrestrict zPgWL4VBjm8ZnuvnD0VEF5JHn4RyEfJ4Cm4qOfJ7ikinOwUdyQ1en1blBXRfv6d
 

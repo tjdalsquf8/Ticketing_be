@@ -4,7 +4,7 @@ import { body, param, query } from "express-validator";
 
 const VALID_CATEGORIES = ["concert", "musical", "sports", "theater", "festival"] as const;
 const VALID_STATUSES   = ["scheduled", "open", "closed", "cancelled"] as const;
-const VALID_REG_STATUSES = ["pending", "entered", "ticketed", "missed", "no_show", "cancelled", "refunded"] as const;
+const VALID_REG_STATUSES = ["pending", "entered", "ticketed", "missed", "no_show", "cancelled"] as const;
 
 /** eventId 경로 파라미터 */
 const eventIdParamValidator = [
@@ -125,10 +125,6 @@ const createEventBodyValidator = [
     // 상한 24시간(86,400,000ms). 실수/악의로 수년~수십년 뒤 closesAt 설정 방지.
     .isInt({ min: 1, max: 86400000 })
     .withMessage("durationMs는 1~86,400,000(24시간) 범위의 정수여야 합니다."),
-  body("entryFeeTickets")
-    .optional()
-    .isInt({ min: 0, max: 100000 })
-    .withMessage("entryFeeTickets는 0~100,000 범위의 정수여야 합니다."),
   body("prize")
     .trim()
     .notEmpty()
@@ -170,10 +166,6 @@ const createSeriesBodyValidator = [
     // 상한 24시간(86,400,000ms). 실수/악의로 수년~수십년 뒤 closesAt 설정 방지.
     .isInt({ min: 1, max: 86400000 })
     .withMessage("durationMs는 1~86,400,000(24시간) 범위의 정수여야 합니다."),
-  body("entryFeeTickets")
-    .optional()
-    .isInt({ min: 0, max: 100000 })
-    .withMessage("entryFeeTickets는 0~100,000 범위의 정수여야 합니다."),
   body("prize")
     .trim()
     .notEmpty()
@@ -237,10 +229,6 @@ const updateEventBodyValidator = [
     // 상한 24시간(86,400,000ms). 실수/악의로 수년~수십년 뒤 closesAt 설정 방지.
     .isInt({ min: 1, max: 86400000 })
     .withMessage("durationMs는 1~86,400,000(24시간) 범위의 정수여야 합니다."),
-  body("entryFeeTickets")
-    .optional()
-    .isInt({ min: 0, max: 100000 })
-    .withMessage("entryFeeTickets는 0~100,000 범위의 정수여야 합니다."),
   body("prize")
     .optional()
     .trim()

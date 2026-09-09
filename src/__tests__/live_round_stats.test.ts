@@ -19,7 +19,7 @@ import {
 } from "./helpers/live.helper";
 import {
   createAdminUser,
-  createTestUserWithTickets,
+  createTestUser as createTestEvUser,
   cleanupTestEvUsers,
   type TestUserResult,
 } from "./helpers/events.helper";
@@ -50,7 +50,7 @@ beforeAll(async () => {
   await cleanupTestLiveUsers();
 
   admin = await createAdminUser();
-  const normal = await createTestUserWithTickets(0);
+  const normal = await createTestEvUser();
 
   adminAgent  = await loginAgent(admin.email, admin.password);
   normalAgent = await loginAgent(normal.email, normal.password);
@@ -119,14 +119,10 @@ describe("GET /api/admin/live/rounds/:roundId/stats", () => {
     // noShow: completed 아닌 세션 = 1 (userB)
     expect(data.noShow).toBe(1);
 
-    // netRevenue: 라이브는 항상 0
-    expect(data.netRevenue).toBe(0);
-
     // 타입 검증
     expect(typeof data.registered).toBe("number");
     expect(typeof data.completed).toBe("number");
     expect(typeof data.noShow).toBe("number");
-    expect(typeof data.netRevenue).toBe("number");
   });
 
   // ─── [1-2] 세션 없는 라운드 → 0 값 ────────────────────────────────────────────
@@ -148,7 +144,6 @@ describe("GET /api/admin/live/rounds/:roundId/stats", () => {
     expect(data.registered).toBe(0);
     expect(data.completed).toBe(0);
     expect(data.noShow).toBe(0);
-    expect(data.netRevenue).toBe(0);
   });
 
   // ─── [2] 존재하지 않는 roundId → 404 ─────────────────────────────────────────

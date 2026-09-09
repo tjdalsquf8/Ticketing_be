@@ -184,24 +184,6 @@ const registerEvent = async (req: Request, res: Response, next: NextFunction) =>
 };
 
 /**
- * DELETE /api/events/:eventId/registrations/me
- * 내 신청 취소 (회원 전용)
- */
-const cancelMyRegistration = async (req: Request, res: Response, next: NextFunction) => {
-  if (handleValidation(req, next)) return;
-
-  try {
-    const eventId = parseInt(req.params.eventId as string, 10);
-    const userId  = req.user!.id;
-
-    const data = await eventsService.cancelMyRegistration(eventId, userId);
-    res.status(200).json({ success: true, data });
-  } catch (err) {
-    handleServiceError(err, next);
-  }
-};
-
-/**
  * POST /api/events/:eventId/sessions
  * 티켓팅 세션 시작 (사전 신청자만)
  */
@@ -231,6 +213,5 @@ export {
   listMyRegistrations,
   getEventById,
   registerEvent,
-  cancelMyRegistration,
   startEventSession,
 };
