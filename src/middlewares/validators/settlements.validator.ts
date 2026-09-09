@@ -5,7 +5,7 @@ const VALID_STATUSES = ["pending", "issued"] as const;
 const settlementIdParamValidator = [
   param("id")
     .matches(/^st-\d+$/)
-    .withMessage("id는 st-{ticketId} 형식이어야 합니다."),
+    .withMessage("id는 st-{liveSessionId} 형식이어야 합니다."),
 ];
 
 const listSettlementsQueryValidator = [
