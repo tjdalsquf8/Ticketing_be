@@ -44,7 +44,6 @@ export interface HoldSeatResult {
 export interface ConfirmSeatResult {
   rankNumber: number;
   elapsedMs: number;
-  ticketId: number | null;
 }
 
 /** 서비스 에러 구조: 컨트롤러에서 status / code / message 를 HTTP 응답으로 매핑 */
@@ -577,8 +576,11 @@ async function holdSeat(params: {
  * - 좌석 상태를 sold 로 변경하고 hold 를 삭제한다.
  * - 세션을 completed 로 처리하고 경과 시간을 기록한다.
  * - 해당 회차 내 완료 순위(elapsed_ms ASC)를 계산한다.
- * - 회원이고 순위가 TICKET_RANK_CUTOFF 이내라면 tickets 레코드를 발급한다.
- * - 반환값: 순위, 경과 시간, 발급된 ticketId (비회원 또는 순위 밖이면 null).
+ * - 이벤트 세션이면 event_registrations 를 ticketed 로 전이한다.
+ * - 반환값: 순위, 경과 시간.
+ *
+ * 주의: rankNumber 는 "확정 시점까지 완주한 사람" 기준이라 최종 순위와 다를 수 있다.
+ * 확정된 최종 순위는 live_sessions.elapsed_ms 를 정렬하는 랭킹 API 를 봐야 한다.
  */
 async function confirmSeat(params: {
   sessionId: string;
@@ -611,9 +613,8 @@ async function confirmSeat(params: {
   const contextId: number = isEventSession ? session.event_id : session.round_id;
   const sessionDbId: number = session.id;
 
-  // 티켓 저장용 event_id 결정:
-  //   - 이벤트 세션: contextId 그대로 사용 (tickets.event_id = event_id, round_id=NULL)
-  //   - 라이브 세션: event_id NULL (tickets.round_id = round_id, event_id=NULL)
+  // event_registrations 갱신 대상 event_id 결정.
+  // 라이브 세션이면 갱신할 신청 레코드가 없으므로 null.
   let ticketEventId: number | null;
   if (isEventSession) {
     ticketEventId = contextId;
@@ -684,98 +685,23 @@ async function confirmSeat(params: {
     );
     const rank = parseInt(rankRes.rows[0].rank, 10);
 
-    // 티켓 발급: 회원 + 순위 ≤ config.live.ticketRankCutoff
-    let ticketId: number | null = null;
+    // 티켓 개념이 제거되어 더 이상 발급물이 없다. 이벤트 세션은 신청 상태만 전이한다.
+    // 유료 이벤트 TOP3 기프티콘 정산은 이제 live_sessions.elapsed_ms 를 조회 시점에
+    // 정렬해서 판정한다 (settlements.service.ts 의 SETTLEMENT_BASE_CTE).
     const sessionUserId: number | null = session.user_id;
 
-    if (sessionUserId != null && rank <= config.live.ticketRankCutoff) {
-      // serial: crypto.randomUUID() 앞 12자 대문자 (하이픈 제거)
-      const serial = crypto
-        .randomUUID()
-        .replace(/-/g, "")
-        .substring(0, 12)
-        .toUpperCase();
-
-      // 이벤트 세션: event_registrations.status → ticketed, ticket_id 업데이트
-      if (isEventSession) {
-        await client.query(
-          `UPDATE public.event_registrations
-           SET status = 'entered'
-           WHERE event_id = $1 AND user_id = $2 AND status IN ('pending', 'entered')`,
-          [ticketEventId, sessionUserId],
-        );
-      }
-
-      // tickets INSERT — uq_tickets_round_rank (round_id, rank) unique 제약으로
-      // 동시 confirm 시 중복 rank INSERT 가 차단된다.
-      // unique violation(PG code 23505) 발생 시 MAX(rank)+1 로 재계산 후 최대 3회 재시도.
-      // 이벤트 세션은 round_id=NULL 로 INSERT (tickets.round_id NOT NULL이므로 별도 처리)
-      const roundIdForTicket: number | null = isEventSession ? null : contextId;
-
-      let insertedRank = rank;
-      let insertAttempt = 0;
-      while (insertAttempt < 3) {
-        try {
-          const insertRes = await client.query(
-            `INSERT INTO tickets
-               (live_session_id, user_id, round_id, event_id, passenger_nickname,
-                serial, seat_label, elapsed_ms, rank, total_participants)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0)
-             RETURNING id`,
-            [
-              sessionDbId,
-              sessionUserId,
-              roundIdForTicket,
-              ticketEventId,
-              session.nickname,
-              serial,
-              seatLabel,
-              serverElapsedMs,
-              insertedRank,
-            ],
-          );
-          ticketId = insertRes.rows[0]?.id ?? null;
-
-          // 티켓 발급 성공 → 보유 티켓 잔액 +1
-          if (ticketId != null) {
-            await client.query(
-              `UPDATE public.users SET tickets = tickets + 1 WHERE id = $1`,
-              [sessionUserId],
-            );
-          }
-
-          // 이벤트 세션: event_registrations.ticket_id 연결 + status → ticketed
-          if (isEventSession && ticketId != null) {
-            await client.query(
-              `UPDATE public.event_registrations
-               SET status = 'ticketed', ticket_id = $1
-               WHERE event_id = $2 AND user_id = $3 AND status = 'entered'`,
-              [ticketId, ticketEventId, sessionUserId],
-            );
-          }
-          break;
-        } catch (insertErr: unknown) {
-          // PostgreSQL unique violation: error code 23505
-          const pgErr = insertErr as { code?: string };
-          if (pgErr?.code === "23505") {
-            // 현재 최대 rank + 1 로 재계산
-            const maxRankRes = await client.query(
-              `SELECT COALESCE(MAX(rank), 0) + 1 AS next_rank
-               FROM tickets WHERE ${contextCol} = $1`,
-              [contextId],
-            );
-            insertedRank = maxRankRes.rows[0].next_rank as number;
-            insertAttempt++;
-          } else {
-            throw insertErr;
-          }
-        }
-      }
+    if (isEventSession && sessionUserId != null) {
+      await client.query(
+        `UPDATE public.event_registrations
+         SET status = 'ticketed'
+         WHERE event_id = $1 AND user_id = $2 AND status IN ('pending', 'entered')`,
+        [ticketEventId, sessionUserId],
+      );
     }
 
     await client.query("COMMIT");
 
-    return { rankNumber: rank, elapsedMs: serverElapsedMs, ticketId };
+    return { rankNumber: rank, elapsedMs: serverElapsedMs };
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;

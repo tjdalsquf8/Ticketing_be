@@ -84,11 +84,11 @@ const createEvent = async (req: Request, res: Response, next: NextFunction) => {
     // 관리자 지정 필드(status/createdBy 등)가 삽입되는 경로를 원천 차단.
     const {
       type, title, category, venueId, opensAt, durationMs,
-      entryFeeTickets, prize, posterColor, posterInitial,
+      prize, posterColor, posterInitial,
     } = req.body;
     const data = await eventsService.createEvent(
       { type, title, category, venueId, opensAt, durationMs,
-        entryFeeTickets, prize, posterColor, posterInitial },
+        prize, posterColor, posterInitial },
       createdBy,
     );
     res.status(201).json({ success: true, data });
@@ -108,11 +108,11 @@ const createEventSeries = async (req: Request, res: Response, next: NextFunction
     const createdBy = req.user!.id;
     // Mass Assignment 방지: 허용 필드만 추출.
     const {
-      title, category, venueId, durationMs, entryFeeTickets,
+      title, category, venueId, durationMs,
       prize, posterColor, posterInitial, recurrence,
     } = req.body;
     const data = await eventsService.createEventSeries(
-      { title, category, venueId, durationMs, entryFeeTickets,
+      { title, category, venueId, durationMs,
         prize, posterColor, posterInitial, recurrence },
       createdBy,
     );
@@ -135,11 +135,11 @@ const updateEvent = async (req: Request, res: Response, next: NextFunction) => {
     // status/registeredCount/cancelledAt 등 상태 필드가 body 로 스며들지 못하게 차단.
     const {
       title, category, venueId, opensAt, durationMs,
-      entryFeeTickets, prize, posterColor, posterInitial,
+      prize, posterColor, posterInitial,
     } = req.body;
     const data = await eventsService.updateEvent(eventId, {
       title, category, venueId, opensAt, durationMs,
-      entryFeeTickets, prize, posterColor, posterInitial,
+      prize, posterColor, posterInitial,
     });
     res.status(200).json({ success: true, data });
   } catch (err) {
@@ -211,7 +211,7 @@ const adminListRegistrations = async (req: Request, res: Response, next: NextFun
 
 /**
  * GET /api/admin/events/:eventId/stats
- * 이벤트 결과 통계 (registered/ticketed/noShow/netRevenue)
+ * 이벤트 결과 통계 (registered/ticketed/noShow)
  */
 const adminGetEventStats = async (req: Request, res: Response, next: NextFunction) => {
   if (handleValidation(req, next)) return;

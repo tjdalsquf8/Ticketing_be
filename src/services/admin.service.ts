@@ -1,5 +1,7 @@
 import pool from "../config/db";
 import { AppError } from "../middlewares/errorHandler";
+import { ROUND_DURATION_MINUTES } from "./live.service";
+import { scheduleRoundClose } from "../jobs/liveScheduler";
 
 // ─── Live Config ─────────────────────────────────────────────
 
@@ -271,6 +273,59 @@ const getRoundDetail = async (roundId: number): Promise<RoundDetail> => {
   };
 };
 
+// 임시(테스트용): 정각을 기다리지 않고 지금 즉시 open 상태 회차 생성.
+// - venue/좌석 구성은 live_config(default_venue_id/default_seat_labels) 그대로 재사용
+// - opens_at=NOW(), closes_at=NOW()+ROUND_DURATION_MINUTES 는 정각 회차와 동일 길이
+// - transitionRounds(scheduled→open)가 하던 live_seats 벌크 INSERT를 여기서 즉시 수행
+// - 테스트 종료 후 제거 예정 (라우트/컨트롤러와 함께 삭제)
+const createRoundNow = async (): Promise<RoundListRow> => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const cfgResult = await client.query(
+      `SELECT default_venue_id, default_seat_labels FROM live_config WHERE id = 1`,
+    );
+    if (cfgResult.rows.length === 0) {
+      throw new AppError(
+        409,
+        "LIVE_CONFIG_NOT_INITIALIZED",
+        "공연장 배치를 먼저 저장해주세요.",
+      );
+    }
+    const { default_venue_id, default_seat_labels } = cfgResult.rows[0];
+
+    const roundResult = await client.query(
+      `INSERT INTO live_rounds (opens_at, closes_at, venue_id, seat_labels, status)
+       VALUES (NOW(), NOW() + make_interval(mins => $1::int), $2, $3::jsonb, 'open')
+       RETURNING id, opens_at, closes_at, status, created_at`,
+      [ROUND_DURATION_MINUTES, default_venue_id, JSON.stringify(default_seat_labels)],
+    );
+    const round = roundResult.rows[0];
+
+    await client.query(
+      `INSERT INTO live_seats (round_id, seat_label)
+       SELECT $1, label
+       FROM jsonb_array_elements_text($2::jsonb) AS label
+       ON CONFLICT (round_id, seat_label) DO NOTHING`,
+      [round.id, JSON.stringify(default_seat_labels)],
+    );
+
+    await client.query("COMMIT");
+
+    // 정각 회차용 크론은 매시 :00 과 :ROUND_DURATION_MINUTES 에만 발화한다.
+    // 임의 시각에 만든 이 회차는 그 사이에 끝나므로 종료 타이머를 따로 걸어준다.
+    scheduleRoundClose(round.id, new Date(round.closes_at));
+
+    return { ...mapRoundRow(round), participantCount: 0 };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 export {
   getLiveConfig,
   upsertLiveConfigVenue,
@@ -278,4 +333,5 @@ export {
   listRounds,
   cancelRound,
   getRoundDetail,
+  createRoundNow,
 };

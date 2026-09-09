@@ -468,7 +468,7 @@ describe("Live Participate API", () => {
   // ─── [5] 좌석 확정 ──────────────────────────────────────────────────────
 
   describe("[5] POST /api/live/sessions/:sessionId/confirm — 좌석 확정", () => {
-    it("[5-1] 회원 + rank ≤ 10 → 티켓 발급 (ticketId 반환)", async () => {
+    it("[5-1] 회원 완주 → rankNumber 반환, ticketId 없음", async () => {
       const { roundId, seatLabels } = await createTestRound({ status: "open" });
       createdRoundIds.push(roundId);
 
@@ -499,23 +499,20 @@ describe("Live Participate API", () => {
       expect(res.body.success).toBe(true);
       expect(res.body.data.rankNumber).toBeGreaterThan(0);
       expect(res.body.data.elapsedMs).toBeGreaterThanOrEqual(0);
-      expect(res.body.data.ticketId).not.toBeNull();
-      expect(typeof res.body.data.ticketId).toBe("number");
+      // 티켓 개념이 제거되어 발급물이 없다
+      expect(res.body.data.ticketId).toBeUndefined();
 
-      // tickets 테이블 확인
-      const ticket = await pool.query(
-        `SELECT * FROM tickets WHERE id = $1`,
-        [res.body.data.ticketId],
+      // 완주 세션은 기록으로 남는다
+      const sessionRow = await pool.query(
+        `SELECT status, elapsed_ms FROM live_sessions
+         WHERE round_id = $1 AND user_id = $2`,
+        [roundId, userId],
       );
-      expect(ticket.rows.length).toBe(1);
-      expect(ticket.rows[0].user_id).toBe(userId);
-
-      // 티켓 발급 시 보유 티켓 잔액 +1
-      const userRow = await pool.query(`SELECT tickets FROM users WHERE id = $1`, [userId]);
-      expect(userRow.rows[0].tickets).toBe(1);
+      expect(sessionRow.rows.length).toBe(1);
+      expect(sessionRow.rows[0].status).toBe("completed");
     });
 
-    it("[5-2] 게스트 → ticketId: null", async () => {
+    it("[5-2] 게스트도 좌석 확정 가능 (발급물 없음)", async () => {
       const { roundId, seatLabels } = await createTestRound({ status: "open" });
       createdRoundIds.push(roundId);
 
@@ -546,7 +543,7 @@ describe("Live Participate API", () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data.elapsedMs).toBeGreaterThanOrEqual(0);
-      expect(res.body.data.ticketId).toBeNull();
+      expect(res.body.data.ticketId).toBeUndefined();
     });
 
     it("[5-3] 만료된 hold → 409 HOLD_EXPIRED", async () => {

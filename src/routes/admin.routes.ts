@@ -82,6 +82,9 @@ router.patch(
   adminController.cancelRound,
 );
 
+// 임시(테스트용): 정각 대기 없이 즉시 open 회차 생성. 테스트 종료 후 제거 예정.
+router.post("/live/rounds/create-now", adminController.createRoundNow);
+
 // Live cron 수동 실행
 router.post(
   "/live/cron/run",

@@ -11,7 +11,7 @@ import app from "../app";
 import pool from "../config/db";
 import {
   createAdminUser,
-  createTestUserWithTickets,
+  createTestUser,
   createTestEvent,
   cleanupTestEvents,
   cleanupTestEvUsers,
@@ -37,14 +37,19 @@ async function loginAgent(email: string, password: string) {
   return agent;
 }
 
-/** 유료 이벤트 참가 티켓 직접 삽입 (live_sessions + tickets, event_id 기준) */
-async function insertEventTicket(opts: {
+/**
+ * 유료 이벤트 완주 세션 직접 삽입.
+ *
+ * TOP3 판정이 tickets.rank 가 아니라 live_sessions.elapsed_ms 정렬로 바뀌었으므로,
+ * 등수는 elapsedMs 의 상대적 크기로 결정된다 (작을수록 상위).
+ * 반환값은 정산 id(`st-{n}`)에 쓰이는 live_sessions.id.
+ */
+async function insertEventFinisher(opts: {
   userId: number;
   eventId: number;
-  rank: number;
-  elapsedMs?: number;
+  elapsedMs: number;
 }): Promise<number> {
-  const { userId, eventId, rank, elapsedMs = 5000 } = opts;
+  const { userId, eventId, elapsedMs } = opts;
   const sessionId = crypto.randomBytes(8).toString("hex");
 
   const sessionRes = await pool.query(
@@ -54,18 +59,20 @@ async function insertEventTicket(opts: {
      RETURNING id`,
     [sessionId, userId, elapsedMs, eventId],
   );
-  const sessionDbId: number = sessionRes.rows[0].id;
+  return sessionRes.rows[0].id;
+}
 
-  const serial = crypto.randomUUID().replace(/-/g, "").substring(0, 12).toUpperCase();
-  const ticketRes = await pool.query(
-    `INSERT INTO tickets
-       (live_session_id, user_id, round_id, event_id, passenger_nickname,
-        serial, seat_label, elapsed_ms, rank, total_participants)
-     VALUES ($1, $2, NULL, $3, 'test_nick', $4, 'A-1-1', $5, $6, 0)
-     RETURNING id`,
-    [sessionDbId, userId, eventId, serial, elapsedMs, rank],
+/**
+ * 정산 대상이 되려면 이벤트가 closed 여야 한다.
+ * 진행 중 이벤트는 순위가 계속 바뀌므로 CTE 에서 제외된다.
+ */
+async function createClosedEvent(): Promise<number> {
+  const { eventId } = await createTestEvent(
+    { status: "closed", opensAt: new Date(Date.now() - 2 * 60 * 60 * 1000) },
+    admin.userId,
   );
-  return ticketRes.rows[0].id;
+  createdEventIds.push(eventId);
+  return eventId;
 }
 
 /** 테스트용 기프티콘 재고 직접 삽입 */
@@ -90,7 +97,7 @@ async function insertGifticon(opts: {
 beforeAll(async () => {
   await cleanupTestEvUsers();
   admin = await createAdminUser();
-  normalUser = await createTestUserWithTickets(10000);
+  normalUser = await createTestUser();
   adminAgent = await loginAgent(admin.email, admin.password);
   normalAgent = await loginAgent(normalUser.email, normalUser.password);
 });
@@ -117,12 +124,16 @@ describe("Settlements (Gifticons) API", () => {
       expect(res.status).toBe(403);
     });
 
-    it("[1-3] TOP3 당첨자만 pending 상태로 반환, rank 4위는 제외", async () => {
-      const { eventId } = await createTestEvent({}, admin.userId);
-      createdEventIds.push(eventId);
+    it("[1-3] 빠른 순 TOP3만 pending 으로 반환, 4위는 제외", async () => {
+      const eventId = await createClosedEvent();
 
-      const t1 = await insertEventTicket({ userId: normalUser.userId, eventId, rank: 1 });
-      await insertEventTicket({ userId: normalUser.userId, eventId, rank: 4 });
+      const first  = await insertEventFinisher({ userId: normalUser.userId, eventId, elapsedMs: 1000 });
+      const u2 = await createTestUser();
+      const u3 = await createTestUser();
+      const u4 = await createTestUser();
+      await insertEventFinisher({ userId: u2.userId, eventId, elapsedMs: 2000 });
+      await insertEventFinisher({ userId: u3.userId, eventId, elapsedMs: 3000 });
+      const fourth = await insertEventFinisher({ userId: u4.userId, eventId, elapsedMs: 4000 });
 
       const res = await adminAgent.get(
         `/api/admin/settlements/gifticons?eventId=${eventId}`,
@@ -130,20 +141,23 @@ describe("Settlements (Gifticons) API", () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.data).toHaveLength(1);
-      const row = res.body.data[0];
-      expect(row.id).toBe(`st-${t1}`);
-      expect(row.eventId).toBe(eventId);
-      expect(row.rank).toBe(1);
-      expect(row.status).toBe("pending");
-      expect(row.gifticonId).toBeNull();
-      expect(row.userId).toBe(normalUser.userId);
+      expect(res.body.data).toHaveLength(3);
+
+      const ids = res.body.data.map((r: { id: string }) => r.id);
+      expect(ids).toContain(`st-${first}`);
+      expect(ids).not.toContain(`st-${fourth}`);
+
+      const top = res.body.data.find((r: { id: string }) => r.id === `st-${first}`);
+      expect(top.rank).toBe(1);
+      expect(top.eventId).toBe(eventId);
+      expect(top.status).toBe("pending");
+      expect(top.gifticonId).toBeNull();
+      expect(top.userId).toBe(normalUser.userId);
     });
 
     it("[1-4] status=issued 필터 시 pending row는 제외된다", async () => {
-      const { eventId } = await createTestEvent({}, admin.userId);
-      createdEventIds.push(eventId);
-      await insertEventTicket({ userId: normalUser.userId, eventId, rank: 1 });
+      const eventId = await createClosedEvent();
+      await insertEventFinisher({ userId: normalUser.userId, eventId, elapsedMs: 1000 });
 
       const res = await adminAgent.get(
         `/api/admin/settlements/gifticons?eventId=${eventId}&status=issued`,
@@ -152,18 +166,53 @@ describe("Settlements (Gifticons) API", () => {
       expect(res.status).toBe(200);
       expect(res.body.data).toHaveLength(0);
     });
+
+    it("[1-5] 아직 종료되지 않은 이벤트는 정산 대상이 아니다", async () => {
+      const { eventId } = await createTestEvent(
+        { status: "open", opensAt: new Date(Date.now() - 10 * 60 * 1000) },
+        admin.userId,
+      );
+      createdEventIds.push(eventId);
+      await insertEventFinisher({ userId: normalUser.userId, eventId, elapsedMs: 1000 });
+
+      const res = await adminAgent.get(
+        `/api/admin/settlements/gifticons?eventId=${eventId}`,
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(0);
+    });
+
+    it("[1-6] 동점자가 있어도 이벤트당 정확히 3명만 반환한다", async () => {
+      const eventId = await createClosedEvent();
+
+      await insertEventFinisher({ userId: normalUser.userId, eventId, elapsedMs: 5000 });
+      for (let i = 0; i < 3; i++) {
+        const u = await createTestUser();
+        await insertEventFinisher({ userId: u.userId, eventId, elapsedMs: 5000 });
+      }
+
+      const res = await adminAgent.get(
+        `/api/admin/settlements/gifticons?eventId=${eventId}`,
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(3);
+      expect(res.body.data.map((r: { rank: number }) => r.rank).sort()).toEqual([1, 2, 3]);
+    });
   });
 
   describe("[2] POST /api/admin/settlements/gifticons/:id/issue", () => {
     it("[2-1] pending row에 available 재고 배정 → issued 전환", async () => {
-      const { eventId } = await createTestEvent({}, admin.userId);
-      createdEventIds.push(eventId);
-      const ticketId = await insertEventTicket({ userId: normalUser.userId, eventId, rank: 1 });
+      const eventId = await createClosedEvent();
+      const sessionId = await insertEventFinisher({
+        userId: normalUser.userId, eventId, elapsedMs: 1000,
+      });
       const gifticonId = await insertGifticon({ createdBy: admin.userId });
       createdGifticonIds.push(gifticonId);
 
       const res = await adminAgent
-        .post(`/api/admin/settlements/gifticons/st-${ticketId}/issue`)
+        .post(`/api/admin/settlements/gifticons/st-${sessionId}/issue`)
         .set("Content-Type", "application/json")
         .send({ gifticonId });
 
@@ -179,20 +228,21 @@ describe("Settlements (Gifticons) API", () => {
     });
 
     it("[2-2] 이미 issued인 row 재요청 → 409", async () => {
-      const { eventId } = await createTestEvent({}, admin.userId);
-      createdEventIds.push(eventId);
-      const ticketId = await insertEventTicket({ userId: normalUser.userId, eventId, rank: 1 });
+      const eventId = await createClosedEvent();
+      const sessionId = await insertEventFinisher({
+        userId: normalUser.userId, eventId, elapsedMs: 1000,
+      });
       const gifticonId1 = await insertGifticon({ createdBy: admin.userId });
       const gifticonId2 = await insertGifticon({ createdBy: admin.userId });
       createdGifticonIds.push(gifticonId1, gifticonId2);
 
       await adminAgent
-        .post(`/api/admin/settlements/gifticons/st-${ticketId}/issue`)
+        .post(`/api/admin/settlements/gifticons/st-${sessionId}/issue`)
         .set("Content-Type", "application/json")
         .send({ gifticonId: gifticonId1 });
 
       const res = await adminAgent
-        .post(`/api/admin/settlements/gifticons/st-${ticketId}/issue`)
+        .post(`/api/admin/settlements/gifticons/st-${sessionId}/issue`)
         .set("Content-Type", "application/json")
         .send({ gifticonId: gifticonId2 });
 
@@ -200,29 +250,36 @@ describe("Settlements (Gifticons) API", () => {
     });
 
     it("[2-3] available 아닌 재고 지정 → 409", async () => {
-      const { eventId } = await createTestEvent({}, admin.userId);
-      createdEventIds.push(eventId);
-      const ticketId = await insertEventTicket({ userId: normalUser.userId, eventId, rank: 2 });
+      const eventId = await createClosedEvent();
+      const sessionId = await insertEventFinisher({
+        userId: normalUser.userId, eventId, elapsedMs: 1000,
+      });
       const gifticonId = await insertGifticon({ createdBy: admin.userId, status: "issued" });
       createdGifticonIds.push(gifticonId);
 
       const res = await adminAgent
-        .post(`/api/admin/settlements/gifticons/st-${ticketId}/issue`)
+        .post(`/api/admin/settlements/gifticons/st-${sessionId}/issue`)
         .set("Content-Type", "application/json")
         .send({ gifticonId });
 
       expect(res.status).toBe(409);
     });
 
-    it("[2-4] TOP3가 아닌 티켓(rank 4)은 정산 대상 아님 → 404", async () => {
-      const { eventId } = await createTestEvent({}, admin.userId);
-      createdEventIds.push(eventId);
-      const ticketId = await insertEventTicket({ userId: normalUser.userId, eventId, rank: 4 });
+    it("[2-4] TOP3가 아닌 참가자(4위)는 정산 대상 아님 → 404", async () => {
+      const eventId = await createClosedEvent();
+      await insertEventFinisher({ userId: normalUser.userId, eventId, elapsedMs: 1000 });
+      const u2 = await createTestUser();
+      const u3 = await createTestUser();
+      const u4 = await createTestUser();
+      await insertEventFinisher({ userId: u2.userId, eventId, elapsedMs: 2000 });
+      await insertEventFinisher({ userId: u3.userId, eventId, elapsedMs: 3000 });
+      const fourth = await insertEventFinisher({ userId: u4.userId, eventId, elapsedMs: 4000 });
+
       const gifticonId = await insertGifticon({ createdBy: admin.userId });
       createdGifticonIds.push(gifticonId);
 
       const res = await adminAgent
-        .post(`/api/admin/settlements/gifticons/st-${ticketId}/issue`)
+        .post(`/api/admin/settlements/gifticons/st-${fourth}/issue`)
         .set("Content-Type", "application/json")
         .send({ gifticonId });
 

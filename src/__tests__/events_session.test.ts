@@ -13,7 +13,7 @@ import app from "../app";
 import pool from "../config/db";
 import {
   createAdminUser,
-  createTestUserWithTickets,
+  createTestUser,
   createTestEvent,
   createTestRegistration,
   cleanupTestEvents,
@@ -42,7 +42,7 @@ async function createOpenEvent(adminUserId: number): Promise<{ eventId: number }
   const opensAt = new Date(Date.now() - 10 * 60 * 1000); // 10분 전 오픈
   // durationMs = 2시간 → closesAt = opensAt + 2h = 지금+110분 (충분히 미래)
   const { eventId } = await createTestEvent(
-    { status: "open", opensAt, entryFeeTickets: 0, durationMs: 2 * 60 * 60 * 1000 },
+    { status: "open", opensAt, durationMs: 2 * 60 * 60 * 1000 },
     adminUserId,
   );
   return { eventId };
@@ -53,7 +53,7 @@ async function registerAndEnter(
   eventId: number,
   userId: number,
 ): Promise<{ registrationId: number }> {
-  return createTestRegistration(eventId, userId, { status: "pending", ticketsPaid: 0 });
+  return createTestRegistration(eventId, userId, { status: "pending"});
 }
 
 // ─── Setup / Teardown ─────────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithTickets(0);
+      const user  = await createTestUser();
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -98,7 +98,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithTickets(0);
+      const user  = await createTestUser();
       const agent = await loginAgent(user.email, user.password);
 
       const res = await agent
@@ -113,7 +113,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createTestEvent({ status: "scheduled" }, admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithTickets(0);
+      const user  = await createTestUser();
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -140,7 +140,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithTickets(0);
+      const user  = await createTestUser();
       const { registrationId } = await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -160,7 +160,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithTickets(0);
+      const user  = await createTestUser();
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -186,7 +186,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithTickets(0);
+      const user  = await createTestUser();
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -206,7 +206,7 @@ describe("Events Session API (ticketing flow)", () => {
     it("[2-2] 존재하지 않는 sessionId(유효 형식) → 404", async () => {
       // 세션 후속 API 는 authMiddleware 로 인증 강제. 인증된 유저가 존재하지 않는
       // sessionId 를 조회하면 서비스 레이어에서 SESSION_NOT_FOUND(404) 반환.
-      const user  = await createTestUserWithTickets(0);
+      const user  = await createTestUser();
       const agent = await loginAgent(user.email, user.password);
 
       // sessionId 형식 = 20자 소문자 hex
@@ -224,7 +224,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithTickets(0);
+      const user  = await createTestUser();
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -258,7 +258,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithTickets(0);
+      const user  = await createTestUser();
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -293,11 +293,11 @@ describe("Events Session API (ticketing flow)", () => {
   // ─── [4] 전체 hold → confirm 흐름 ────────────────────────────────────────────
 
   describe("[4] hold → confirm 흐름", () => {
-    it("[4-1] 신청자 세션 시작 → hold → confirm → ticketed 상태 + ticketId 발급", async () => {
+    it("[4-1] 신청자 세션 시작 → hold → confirm → ticketed 상태", async () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithTickets(0);
+      const user  = await createTestUser();
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -340,39 +340,25 @@ describe("Events Session API (ticketing flow)", () => {
       expect(confirmRes.body.data.rankNumber).toBeGreaterThan(0);
       expect(confirmRes.body.data.elapsedMs).toBeGreaterThanOrEqual(0);
 
-      // 5. ticketId 확인 (상위 ticketRankCutoff 이내면 발급)
-      const ticketId = confirmRes.body.data.ticketId as number | null;
-      if (ticketId !== null) {
-        expect(typeof ticketId).toBe("number");
+      // 5. 티켓 개념이 제거되어 ticketId 는 더 이상 응답에 없다
+      expect(confirmRes.body.data.ticketId).toBeUndefined();
 
-        // tickets 테이블에 레코드 존재 확인
-        const ticketCheck = await pool.query(
-          `SELECT user_id FROM tickets WHERE id = $1`,
-          [ticketId],
-        );
-        expect(ticketCheck.rows.length).toBe(1);
-        expect(ticketCheck.rows[0].user_id).toBe(user.userId);
-      }
-
-      // 6. event_registrations.status → ticketed or entered (ticketId 있으면 ticketed)
+      // 6. event_registrations.status → ticketed
       const regCheck = await pool.query(
-        `SELECT status, ticket_id
+        `SELECT status
          FROM event_registrations
          WHERE event_id = $1 AND user_id = $2`,
         [eventId, user.userId],
       );
       expect(regCheck.rows.length).toBe(1);
-      if (ticketId !== null) {
-        expect(regCheck.rows[0].status).toBe("ticketed");
-        expect(regCheck.rows[0].ticket_id).toBe(ticketId);
-      }
+      expect(regCheck.rows[0].status).toBe("ticketed");
     });
 
     it("[4-1-1] hold 시 live_seats에 없는 3-segment 라벨 → upsert 후 hold 성공", async () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithTickets(0);
+      const user  = await createTestUser();
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -406,7 +392,7 @@ describe("Events Session API (ticketing flow)", () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithTickets(0);
+      const user  = await createTestUser();
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -429,14 +415,14 @@ describe("Events Session API (ticketing flow)", () => {
     });
   });
 
-  // ─── [5] ticketRankCutoff 경계 검증 ──────────────────────────────────────────
+  // ─── [5] confirm 순위 검증 ───────────────────────────────────────────────────
 
-  describe("[5] ticketRankCutoff 경계 검증", () => {
-    it("[5-1] 첫 번째 confirm 참가자 → rankNumber=1 (ticketId 발급 대상)", async () => {
+  describe("[5] confirm 순위 검증", () => {
+    it("[5-1] 첫 번째 confirm 참가자 → rankNumber=1", async () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
-      const user  = await createTestUserWithTickets(0);
+      const user  = await createTestUser();
       await registerAndEnter(eventId, user.userId);
 
       const agent = await loginAgent(user.email, user.password);
@@ -463,8 +449,7 @@ describe("Events Session API (ticketing flow)", () => {
 
       expect(confirmRes.status).toBe(200);
       expect(confirmRes.body.data.rankNumber).toBe(1);
-      // 1번 → ticketId가 있어야 함
-      expect(confirmRes.body.data.ticketId).not.toBeNull();
+      expect(confirmRes.body.data.ticketId).toBeUndefined();
     });
   });
 });

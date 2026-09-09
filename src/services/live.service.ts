@@ -204,9 +204,8 @@ export interface RoundStatsRow {
   roundId: number;
   status: string;
   registered: number;
-  ticketed: number;
+  completed: number;
   noShow: number;
-  netRevenue: number;
 }
 
 /**
@@ -214,10 +213,9 @@ export interface RoundStatsRow {
  *
  * 필드:
  *   registered — 그 라운드에 참여 시도한 총 세션 수 (상태 무관).
- *   ticketed   — 티켓 발급 성공 수 (tickets.round_id = roundId).
+ *   completed  — 좌석 확정까지 완주한 세션 수.
  *   noShow     — active 진입 후 좌석 확정 못 한 세션 수
  *                (live_sessions.status != 'completed' — queued/active/failed 포함).
- *   netRevenue — 라이브는 참가비 없으므로 항상 0.
  *
  * 라이브 세션은 completed = 좌석 확정 완료. 그 외 상태는 좌석을 못 잡은 것.
  */
@@ -237,32 +235,25 @@ const getRoundStats = async (roundId: number): Promise<RoundStatsRow> => {
     throw err;
   }
 
-  // 세션 집계: 한 쿼리로 registered / noShow 산출
+  // 세션 집계: 한 쿼리로 registered / completed / noShow 산출
   const sessionStatsRes = await pool.query(
     `SELECT
-       COUNT(*)                                         AS registered,
-       COUNT(*) FILTER (WHERE status != 'completed')   AS no_show
+       COUNT(*)                                        AS registered,
+       COUNT(*) FILTER (WHERE status =  'completed')  AS completed,
+       COUNT(*) FILTER (WHERE status != 'completed')  AS no_show
      FROM live_sessions
      WHERE round_id = $1`,
     [roundId],
   );
 
-  // 티켓 발급 수: tickets.round_id = roundId
-  const ticketRes = await pool.query(
-    `SELECT COUNT(*) AS ticketed FROM tickets WHERE round_id = $1`,
-    [roundId],
-  );
-
   const sRow = sessionStatsRes.rows[0];
-  const tRow = ticketRes.rows[0];
 
   return {
     roundId,
     status:     roundRes.rows[0].status as string,
     registered: parseInt(sRow.registered, 10),
-    ticketed:   parseInt(tRow.ticketed,   10),
+    completed:  parseInt(sRow.completed,  10),
     noShow:     parseInt(sRow.no_show,    10),
-    netRevenue: 0,
   };
 };
 

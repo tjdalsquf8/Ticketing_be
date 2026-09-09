@@ -69,7 +69,7 @@ async function transitionToOpen(eventId: number): Promise<void> {
  *
  * registration 상태 규칙:
  *   - pending  (신청만 하고 세션 미시작) → missed
- *   - entered  + tickets(event_id=$1, user_id) 존재 → ticketed (+ ticket_id 백필)
+ *   - entered  + 완주한 live_sessions 존재 → ticketed
  *   - entered  + 티켓 없음                          → no_show
  *
  * 트랜잭션으로 원자화. 이벤트 상태 변경이 실패하면(이미 다른 상태) 아무 것도
@@ -93,19 +93,20 @@ async function transitionToClosed(eventId: number): Promise<void> {
       return;
     }
 
-    // entered + 티켓 존재 → ticketed + ticket_id 백필
+    // entered + 좌석 확정 완료 세션 존재 → ticketed 백필
     await client.query(
       `UPDATE public.event_registrations er
-       SET status = 'ticketed', ticket_id = t.id
-       FROM public.tickets t
+       SET status = 'ticketed'
+       FROM public.live_sessions ls
        WHERE er.event_id = $1
          AND er.status = 'entered'
-         AND t.event_id = $1
-         AND t.user_id = er.user_id`,
+         AND ls.event_id = $1
+         AND ls.user_id = er.user_id
+         AND ls.status = 'completed'`,
       [eventId],
     );
 
-    // 나머지 entered → no_show (티켓이 없는 경우)
+    // 나머지 entered → no_show (좌석 확정 못 한 경우)
     await client.query(
       `UPDATE public.event_registrations
        SET status = 'no_show'

@@ -15,7 +15,7 @@ import app from "../app";
 import pool from "../config/db";
 import {
   createAdminUser,
-  createTestUserWithTickets,
+  createTestUser,
   createTestEvent,
   createTestRegistration,
   cleanupTestEvents,
@@ -54,7 +54,7 @@ function futureISO(plusMinutes: number): string {
 beforeAll(async () => {
   await cleanupTestEvUsers();
   admin      = await createAdminUser();
-  normalUser = await createTestUserWithTickets(10000);
+  normalUser = await createTestUser();
   adminAgent  = await loginAgent(admin.email, admin.password);
   normalAgent = await loginAgent(normalUser.email, normalUser.password);
 });
@@ -111,8 +111,7 @@ describe("Events Admin API", () => {
           opensAt:        futureISO(10),
           prize:          "test prize",
           posterColor:    "#AABBCC",
-          entryFeeTickets: 500,
-        });
+          });
 
       expect(res.status).toBe(201);
       expect(res.body.success).toBe(true);
@@ -370,19 +369,13 @@ describe("Events Admin API", () => {
   // ─── [6] POST /api/admin/events/:eventId/cancel ──────────────────────────────
 
   describe("[6] POST /api/admin/events/:eventId/cancel — 이벤트 취소", () => {
-    it("[6-1] 정상 취소 → 200, 신청자 자동 환불 (pending → refunded)", async () => {
-      const user = await createTestUserWithTickets(2000);
-      const fee  = 500;
-      const { eventId } = await createTestEvent({ entryFeeTickets: fee }, admin.userId);
+    it("[6-1] 정상 취소 → 200, 신청자 전원 무효화 (pending → cancelled)", async () => {
+      const user = await createTestUser();
+      const { eventId } = await createTestEvent({}, admin.userId);
       createdEventIds.push(eventId);
 
       // 사용자 신청 직접 INSERT
-      await createTestRegistration(eventId, user.userId, { ticketsPaid: fee });
-      // 포인트 차감 시뮬레이션
-      await pool.query(
-        `UPDATE users SET tickets = tickets - $1 WHERE id = $2`,
-        [fee, user.userId],
-      );
+      await createTestRegistration(eventId, user.userId, {});
 
       const res = await adminAgent
         .post(`/api/admin/events/${eventId}/cancel`)
@@ -392,21 +385,14 @@ describe("Events Admin API", () => {
       expect(res.status).toBe(200);
       expect(res.body.data.status).toBe("cancelled");
 
-      // 신청 상태 refunded 확인
+      // 신청 상태 cancelled 확인
       const regRes = await pool.query(
-        `SELECT status, refund_tickets FROM event_registrations
+        `SELECT status, cancelled_at FROM event_registrations
          WHERE event_id = $1 AND user_id = $2`,
         [eventId, user.userId],
       );
-      expect(regRes.rows[0].status).toBe("refunded");
-      expect(regRes.rows[0].refund_tickets).toBe(fee);
-
-      // 포인트 환불 확인
-      const ticketsRes = await pool.query(
-        `SELECT tickets FROM users WHERE id = $1`,
-        [user.userId],
-      );
-      expect(ticketsRes.rows[0].tickets).toBe(2000); // 원상 복귀
+      expect(regRes.rows[0].status).toBe("cancelled");
+      expect(regRes.rows[0].cancelled_at).not.toBeNull();
     });
 
     it("[6-2] 이미 취소된 이벤트 재취소 → 409 EVENT_CANCEL_FORBIDDEN", async () => {
@@ -556,12 +542,12 @@ describe("Events Admin API", () => {
 
   describe("[8] GET /api/admin/events/:eventId/registrations — 신청자 목록", () => {
     it("[8-1] 신청자 목록 조회 → 200, user 정보 포함", async () => {
-      const user = await createTestUserWithTickets(0);
+      const user = await createTestUser();
       const { eventId } = await createTestEvent({}, admin.userId);
       createdEventIds.push(eventId);
 
       // 신청 직접 INSERT
-      await createTestRegistration(eventId, user.userId, { ticketsPaid: 0 });
+      await createTestRegistration(eventId, user.userId, {});
 
       const res = await adminAgent
         .get(`/api/admin/events/${eventId}/registrations`);

@@ -18,7 +18,6 @@ export interface EventRow {
   opensAt: string;
   closesAt: string;
   durationMs: number;
-  entryFeeTickets: number;
   registrationDeadline: string;
   prize: string;
   posterColor: string;
@@ -38,13 +37,9 @@ export interface EventRegistrationRow {
   registrationId: number;
   eventId: number;
   userId: number;
-  ticketsPaid: number;
   registeredAt: string;
   status: string;
-  ticketId: number | null;
   cancelledAt: string | null;
-  refundedAt: string | null;
-  refundTickets: number | null;
 }
 
 export interface VenueRow {
@@ -104,7 +99,6 @@ function mapEvent(row: Record<string, unknown>): EventRow {
     opensAt:              (row.opens_at as Date).toISOString(),
     closesAt:             (row.closes_at as Date).toISOString(),
     durationMs:           row.duration_ms as number,
-    entryFeeTickets:       row.entry_fee_tickets as number,
     registrationDeadline: (row.registration_deadline as Date).toISOString(),
     prize:                row.prize as string,
     posterColor:          row.poster_color as string,
@@ -129,13 +123,9 @@ function mapRegistration(row: Record<string, unknown>): EventRegistrationRow {
     registrationId: row.id as number,
     eventId:        row.event_id as number,
     userId:         row.user_id as number,
-    ticketsPaid:    row.tickets_paid as number,
     registeredAt:   (row.registered_at as Date).toISOString(),
     status:         row.status as string,
-    ticketId:       (row.ticket_id ?? null) as number | null,
     cancelledAt:    row.cancelled_at ? (row.cancelled_at as Date).toISOString() : null,
-    refundedAt:     row.refunded_at  ? (row.refunded_at  as Date).toISOString() : null,
-    refundTickets:  (row.refund_tickets ?? null) as number | null,
   };
 }
 
@@ -143,7 +133,7 @@ function mapRegistration(row: Record<string, unknown>): EventRegistrationRow {
 const EVENT_SELECT = `
   e.id, e.type, e.category, e.title,
   v.slug AS venue_slug, v.name AS venue_name, v.layout AS venue_layout,
-  e.total_seats, e.opens_at, e.closes_at, e.duration_ms, e.entry_fee_tickets,
+  e.total_seats, e.opens_at, e.closes_at, e.duration_ms,
   e.registration_deadline, e.prize, e.poster_color, e.poster_initial,
   e.status, e.series_id, e.registered_count, e.created_by,
   e.created_at, e.updated_at, e.cancelled_at, e.cancel_reason, e.hidden_at
@@ -341,7 +331,7 @@ async function registerEvent(
 
     // 이벤트 로우 락: 검증~INSERT 사이 상태 변경 방지
     const eventRes = await client.query(
-      `SELECT id, status, entry_fee_tickets, registration_deadline
+      `SELECT id, status, registration_deadline
        FROM public.events
        WHERE id = $1
        FOR UPDATE`,
@@ -389,28 +379,13 @@ async function registerEvent(
       throw makeError("ALREADY_REGISTERED", 409, "이미 신청한 이벤트입니다.");
     }
 
-    const entryFeeTickets: number = event.entry_fee_tickets;
-
-    // 티켓 잔액 확인 + 차감 (원자적 UPDATE)
-    const ticketsRes = await client.query(
-      `UPDATE public.users
-       SET tickets = tickets - $1
-       WHERE id = $2 AND tickets >= $1
-       RETURNING tickets`,
-      [entryFeeTickets, userId],
-    );
-    if ((ticketsRes.rowCount ?? 0) === 0) {
-      await client.query("ROLLBACK");
-      throw makeError("INSUFFICIENT_TICKETS", 409, "보유 티켓이 부족합니다.");
-    }
-
     // 신청 레코드 생성
     const regRes = await client.query(
       `INSERT INTO public.event_registrations
-         (event_id, user_id, tickets_paid, status)
-       VALUES ($1, $2, $3, 'pending')
+         (event_id, user_id, status)
+       VALUES ($1, $2, 'pending')
        RETURNING *`,
-      [eventId, userId, entryFeeTickets],
+      [eventId, userId],
     );
 
     // registeredCount 증가
@@ -424,84 +399,6 @@ async function registerEvent(
     return mapRegistration(regRes.rows[0]);
   } catch (err) {
     await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
-/**
- * 6. 내 신청 취소 · 환불
- *
- * 이중 환불 방지: 조건부 UPDATE ... RETURNING 으로 상태 전환과 취소 대상 선정을
- * 하나의 원자적 SQL 로 처리한다. SELECT→UPDATE 두 단계 사이에 다른 프로세스가
- * (관리자 cancelEvent, 이벤트 취소 크론 등) 같은 registration 을 'refunded'로 변경해
- * 발생할 수 있는 이중 환불(TOCTOU)을 차단한다.
- */
-async function cancelMyRegistration(
-  eventId: number,
-  userId: number,
-): Promise<EventRegistrationRow> {
-  const client: PoolClient = await pool.connect();
-  try {
-    await client.query("BEGIN");
-
-    // status='pending' 이면서 opens_at > NOW() 인 행만 원자적으로 cancelled 처리.
-    // 다른 트랜잭션이 이미 refunded/cancelled 로 바꿨다면 rowCount=0.
-    const updated = await client.query(
-      `UPDATE public.event_registrations er
-       SET status = 'cancelled',
-           cancelled_at = NOW(),
-           refunded_at = NOW(),
-           refund_tickets = er.tickets_paid
-       FROM public.events e
-       WHERE er.event_id = $1
-         AND er.user_id = $2
-         AND er.status = 'pending'
-         AND e.id = er.event_id
-         AND e.opens_at > NOW()
-       RETURNING er.*`,
-      [eventId, userId],
-    );
-
-    if ((updated.rowCount ?? 0) === 0) {
-      // 실패 원인 구분: 신청 자체가 없는지 / 이미 처리됐는지 / 오픈 이후인지.
-      // 트랜잭션 롤백 후 별도 SELECT 로 상태 판별.
-      await client.query("ROLLBACK");
-
-      const eventRes = await pool.query(
-        `SELECT opens_at FROM public.events WHERE id = $1`,
-        [eventId],
-      );
-      if (eventRes.rows.length > 0 && new Date() >= new Date(eventRes.rows[0].opens_at)) {
-        throw makeError("CANCEL_NOT_ALLOWED", 409, "오픈 이후에는 취소할 수 없습니다.");
-      }
-      throw makeError("REGISTRATION_NOT_FOUND", 404, "취소할 신청 내역이 없습니다.");
-    }
-
-    const reg = updated.rows[0];
-    const refundTickets: number = reg.tickets_paid;
-
-    // 티켓 환불
-    await client.query(
-      `UPDATE public.users SET tickets = tickets + $1 WHERE id = $2`,
-      [refundTickets, userId],
-    );
-
-    // registeredCount 감소
-    await client.query(
-      `UPDATE public.events
-       SET registered_count = GREATEST(registered_count - 1, 0), updated_at = NOW()
-       WHERE id = $1`,
-      [eventId],
-    );
-
-    await client.query("COMMIT");
-    return mapRegistration(reg);
-  } catch (err) {
-    // ROLLBACK 이 이미 위에서 실행된 경우 두 번째 롤백 시도는 실패할 수 있으나
-    // pg 는 무해하게 처리. 미처 롤백 못 한 경로(예: 후속 UPDATE 실패)를 커버.
-    try { await client.query("ROLLBACK"); } catch { /* ignore */ }
     throw err;
   } finally {
     client.release();
@@ -578,11 +475,12 @@ export interface EventRankingRow {
 
 /**
  * 마지막으로 진행된(closed) 이벤트 하나의 참여자 랭킹.
- * closes_at DESC 로 가장 최근 종료 이벤트를 찾아 tickets 를 rank ASC 정렬해 반환.
+ * closes_at DESC 로 가장 최근 종료 이벤트를 찾아 완주 세션을 빠른 순으로 반환.
  * 종료된 이벤트가 없으면 event=null, rankings=[] 반환.
  *
- * `tickets.event_id IS NOT NULL AND round_id IS NULL` 조건으로 라이브 라운드
- * 티켓과 이벤트 티켓을 구분한다 (라이브 티켓은 round_id 를 가짐).
+ * 정렬 기준(elapsed_ms ASC, completed_at ASC)은 기프티콘 정산의 TOP3 판정
+ * (settlements.service.ts SETTLEMENT_BASE_CTE)과 반드시 일치해야 한다.
+ * 어긋나면 화면에 3등으로 보이는 사람과 실제 지급 대상이 달라진다.
  */
 async function getLatestClosedEventRankings(
   limit: number,
@@ -606,21 +504,21 @@ async function getLatestClosedEventRankings(
 
   const event = mapEvent(evRes.rows[0]);
 
-  const ticketsRes = await pool.query(
-    `SELECT rank, passenger_nickname, seat_label, elapsed_ms, issued_at
-     FROM public.tickets
-     WHERE event_id = $1 AND round_id IS NULL
-     ORDER BY rank ASC
+  const sessionsRes = await pool.query(
+    `SELECT nickname, seat_label, elapsed_ms, completed_at
+     FROM public.live_sessions
+     WHERE event_id = $1 AND status = 'completed'
+     ORDER BY elapsed_ms ASC, completed_at ASC
      LIMIT $2`,
     [event.eventId, limit],
   );
 
-  const rankings: EventRankingRow[] = ticketsRes.rows.map((r) => ({
-    rank:       r.rank as number,
-    nickname:   r.passenger_nickname as string,
+  const rankings: EventRankingRow[] = sessionsRes.rows.map((r, index) => ({
+    rank:       index + 1,
+    nickname:   r.nickname as string,
     seatLabel:  r.seat_label as string,
     elapsedMs:  r.elapsed_ms as number,
-    ticketedAt: (r.issued_at as Date).toISOString(),
+    ticketedAt: (r.completed_at as Date).toISOString(),
   }));
 
   return { event, rankings };
@@ -802,7 +700,6 @@ async function createEvent(
     venueId: string;  // slug 문자열
     opensAt: string;
     durationMs?: number;
-    entryFeeTickets?: number;
     prize: string;
     posterColor: string;
     posterInitial?: string;
@@ -814,7 +711,6 @@ async function createEvent(
     opensAt, prize, posterColor,
   } = params;
   const durationMs     = params.durationMs     ?? 300000;
-  const entryFeeTickets = params.entryFeeTickets ?? 500;
   const posterInitial  = params.posterInitial  ?? "";
 
   const now = new Date();
@@ -859,14 +755,14 @@ async function createEvent(
   const insertRes = await pool.query(
     `INSERT INTO public.events
        (type, title, category, venue_id, total_seats, opens_at, closes_at,
-        duration_ms, entry_fee_tickets, registration_deadline, prize,
+        duration_ms, registration_deadline, prize,
         poster_color, poster_initial, status, created_by)
-     VALUES ('paid', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'scheduled', $13)
+     VALUES ('paid', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'scheduled', $12)
      RETURNING *`,
     [
       title, category, venueIntId, totalSeats,
       opensAtDate.toISOString(), closesAt.toISOString(),
-      durationMs, entryFeeTickets, registrationDeadline.toISOString(),
+      durationMs, registrationDeadline.toISOString(),
       prize, posterColor, posterInitial, createdBy,
     ],
   );
@@ -894,7 +790,6 @@ async function createEventSeries(
     category: string;
     venueId: string;  // slug 문자열
     durationMs?: number;
-    entryFeeTickets?: number;
     prize: string;
     posterColor: string;
     posterInitial?: string;
@@ -910,7 +805,6 @@ async function createEventSeries(
     title, category, venueId, prize, posterColor,
   } = params;
   const durationMs     = params.durationMs     ?? 300000;
-  const entryFeeTickets = params.entryFeeTickets ?? 500;
   const posterInitial  = params.posterInitial  ?? "";
   const { kind, weekdays, startAt } = params.recurrence;
 
@@ -987,12 +881,12 @@ async function createEventSeries(
 
     const seriesInsert = await client.query(
       `INSERT INTO public.event_series
-         (title, category, venue_id, duration_ms, entry_fee_tickets,
+         (title, category, venue_id, duration_ms,
           prize, poster_color, poster_initial, recurrence, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
       [
-        title, category, venueIntId, durationMs, entryFeeTickets,
+        title, category, venueIntId, durationMs,
         prize, posterColor, posterInitial,
         JSON.stringify(recurrenceJson), createdBy,
       ],
@@ -1026,14 +920,14 @@ async function createEventSeries(
       const evInsert = await client.query(
         `INSERT INTO public.events
            (type, title, category, venue_id, total_seats, opens_at, closes_at,
-            duration_ms, entry_fee_tickets, registration_deadline, prize,
+            duration_ms, registration_deadline, prize,
             poster_color, poster_initial, status, series_id, created_by)
-         VALUES ('paid', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'scheduled', $13, $14)
+         VALUES ('paid', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'scheduled', $12, $13)
          RETURNING id`,
         [
           title, category, venueIntId, totalSeats,
           opensAtDate.toISOString(), closesAt.toISOString(),
-          durationMs, entryFeeTickets, registrationDeadline.toISOString(),
+          durationMs, registrationDeadline.toISOString(),
           prize, posterColor, posterInitial, series.id, createdBy,
         ],
       );
@@ -1065,7 +959,6 @@ async function createEventSeries(
         category:       series.category,
         venueId:        venueId,    // slug 문자열 반환
         durationMs:     series.duration_ms,
-        entryFeeTickets: series.entry_fee_tickets,
         prize:          series.prize,
         posterColor:    series.poster_color,
         posterInitial:  series.poster_initial,
@@ -1157,7 +1050,6 @@ async function updateEvent(
     venueId?: string;  // slug 문자열
     opensAt?: string;
     durationMs?: number;
-    entryFeeTickets?: number;
     prize?: string;
     posterColor?: string;
     posterInitial?: string;
@@ -1263,7 +1155,6 @@ async function updateEvent(
     prize:          "prize",
     posterColor:    "poster_color",
     posterInitial:  "poster_initial",
-    entryFeeTickets: "entry_fee_tickets",
   };
 
   for (const [key, col] of Object.entries(fieldMap)) {
@@ -1339,26 +1230,13 @@ async function cancelEventWithClient(
     [reason, eventId],
   );
 
-  // pending 신청자 전원 환불
-  const pendingRes = await client.query(
-    `SELECT id, user_id, tickets_paid
-     FROM public.event_registrations
+  // pending 신청 전원 무효화. 참가비가 없으므로 환불 없이 상태만 cancelled 로 바꾼다.
+  await client.query(
+    `UPDATE public.event_registrations
+     SET status = 'cancelled', cancelled_at = NOW()
      WHERE event_id = $1 AND status = 'pending'`,
     [eventId],
   );
-
-  for (const reg of pendingRes.rows) {
-    await client.query(
-      `UPDATE public.event_registrations
-       SET status = 'refunded', refunded_at = NOW(), refund_tickets = $1
-       WHERE id = $2`,
-      [reg.tickets_paid, reg.id],
-    );
-    await client.query(
-      `UPDATE public.users SET tickets = tickets + $1 WHERE id = $2`,
-      [reg.tickets_paid, reg.user_id],
-    );
-  }
 }
 
 /**
@@ -1527,17 +1405,15 @@ export interface EventStatsRow {
   registered: number;
   ticketed: number;
   noShow: number;
-  netRevenue: number;
 }
 
 /**
  * 관리자 이벤트 통계 (결과 집계 전용).
  *
  * 필드:
- *   registered — 유효 신청 수. cancelled/refunded 제외.
+ *   registered — 유효 신청 수. cancelled 제외.
  *   ticketed   — 좌석 잡기 성공한 사람.
  *   noShow     — 세션 시작했지만 좌석 못 잡음.
- *   netRevenue — 걷은 포인트 - 환불 포인트.
  *
  * 실시간 진행 지표(activeSessions, queuedSessions 등)는 이 API 범위 밖.
  * 필요 시 별도 엔드포인트로 분리.
@@ -1556,11 +1432,7 @@ async function getEventStats(eventId: number): Promise<EventStatsRow> {
        COUNT(*) FILTER (WHERE status IN ('pending','entered','ticketed','no_show','missed'))
          AS registered,
        COUNT(*) FILTER (WHERE status = 'ticketed') AS ticketed,
-       COUNT(*) FILTER (WHERE status = 'no_show')  AS no_show,
-       COALESCE(SUM(tickets_paid)   FILTER (WHERE status IN ('pending','entered','ticketed','no_show','missed')), 0)
-         AS collected,
-       COALESCE(SUM(refund_tickets) FILTER (WHERE status IN ('cancelled','refunded')), 0)
-         AS refunded
+       COUNT(*) FILTER (WHERE status = 'no_show')  AS no_show
      FROM public.event_registrations
      WHERE event_id = $1`,
     [eventId],
@@ -1573,7 +1445,6 @@ async function getEventStats(eventId: number): Promise<EventStatsRow> {
     registered: parseInt(row.registered, 10),
     ticketed:   parseInt(row.ticketed,   10),
     noShow:     parseInt(row.no_show,    10),
-    netRevenue: parseInt(row.collected,  10) - parseInt(row.refunded, 10),
   };
 }
 
@@ -1583,7 +1454,6 @@ export {
   getNearestEvent,
   getEventById,
   registerEvent,
-  cancelMyRegistration,
   listMyRegistrations,
   startEventSession,
   listVenues,

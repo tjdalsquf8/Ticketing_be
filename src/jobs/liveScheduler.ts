@@ -134,7 +134,6 @@ const sweepExpiredHolds = async (): Promise<void> => {
  * closed 전이 직후 처리:
  * 1. 잔여 seat_holds 삭제 + 좌석 held → available 복구.
  * 2. 해당 round 의 active/queued 세션 → failed.
- * 3. tickets.total_participants 를 실제 completed 세션 수로 백필.
  *
  * transitionRounds() 와 같은 타이밍 크론(TRANSITION_SCHEDULE)에 이어 실행한다.
  */
@@ -175,17 +174,6 @@ const finalizeClosedRounds = async (): Promise<void> => {
         [roundId],
       );
 
-      // total_participants 백필 (completed 세션 수 기준)
-      await client.query(
-        `UPDATE tickets t
-         SET total_participants = (
-           SELECT COUNT(*) FROM live_sessions
-           WHERE round_id = $1 AND status = 'completed'
-         )
-         WHERE t.round_id = $1`,
-        [roundId],
-      );
-
       await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK");
@@ -220,7 +208,56 @@ const runFinalize = async () => {
   }
 };
 
-export { promoteQueuedSessions, sweepExpiredHolds, finalizeClosedRounds };
+// ─── 임의 시각 회차 종료 예약 ────────────────────────────────────────────────
+
+/**
+ * scheduleRoundClose
+ *
+ * 특정 회차의 closes_at 에 맞춰 일회성 종료 타이머를 건다.
+ *
+ * 정각 회차는 TRANSITION_SCHEDULE(매시 :00 과 :ROUND_DURATION_MINUTES) 크론이
+ * 지연 없이 닫아준다. 그러나 create-now 처럼 임의 시각에 만들어진 회차는 그 두
+ * 발화 시점 사이에서 종료되므로 다음 정각까지 최대 한 시간 가까이 open 으로 남는다.
+ * 해당 회차만 정확한 시각에 닫기 위한 보완 타이머.
+ *
+ * - 크론이 백스톱으로 남아 있으므로 서버 재시작으로 타이머가 사라져도 결국 닫힌다.
+ * - DB/앱 시계 오차로 `closes_at <= NOW()` 가 아직 거짓일 수 있어 1초 여유를 둔다.
+ * - 회차 길이(ROUND_DURATION_MINUTES)만큼만 대기하므로 setTimeout 상한 걱정 없음.
+ */
+const scheduleRoundClose = (roundId: number, closesAt: Date): void => {
+  if (process.env.NODE_ENV === "test") return;
+
+  const closeRound = async (): Promise<void> => {
+    try {
+      const res = await pool.query(
+        `UPDATE live_rounds SET status = 'closed'
+         WHERE id = $1 AND status = 'open' AND closes_at <= NOW()`,
+        [roundId],
+      );
+      if ((res.rowCount ?? 0) > 0) {
+        console.log(`[live/scheduler] round ${roundId} → closed`);
+      }
+      // 잔여 hold 정리 + active/queued 세션 failed 전이 + total_participants 백필
+      await finalizeClosedRounds();
+    } catch (err) {
+      console.error(`[live/scheduler] closeRound(${roundId}) failed:`, err);
+    }
+  };
+
+  const delay = closesAt.getTime() - Date.now() + 1000;
+  if (delay <= 0) {
+    void closeRound();
+    return;
+  }
+  setTimeout(() => void closeRound(), delay);
+};
+
+export {
+  promoteQueuedSessions,
+  sweepExpiredHolds,
+  finalizeClosedRounds,
+  scheduleRoundClose,
+};
 
 export const startLiveScheduler = () => {
   if (process.env.NODE_ENV === "test") return;

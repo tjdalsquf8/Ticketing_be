@@ -24,8 +24,8 @@ export interface TestUserResult {
   name: string;
 }
 
-/** 테스트용 일반 유저 생성 (티켓 잔액 지정 가능) */
-export async function createTestUserWithTickets(tickets = 0): Promise<TestUserResult> {
+/** 테스트용 일반 유저 생성 */
+export async function createTestUser(): Promise<TestUserResult> {
   const rand     = crypto.randomBytes(5).toString("hex");
   const email    = `${TEST_EV_EMAIL_PREFIX}${rand}@test.com`;
   const password = "test1234!";
@@ -33,10 +33,10 @@ export async function createTestUserWithTickets(tickets = 0): Promise<TestUserRe
   const hashed   = await bcrypt.hash(password, 10);
 
   const res = await pool.query(
-    `INSERT INTO users (email, password, name, tickets)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO users (email, password, name)
+     VALUES ($1, $2, $3)
      RETURNING id`,
-    [email, hashed, name, tickets],
+    [email, hashed, name],
   );
 
   return { userId: res.rows[0].id as number, email, password, name };
@@ -51,8 +51,8 @@ export async function createAdminUser(): Promise<TestUserResult> {
   const hashed   = await bcrypt.hash(password, 10);
 
   const res = await pool.query(
-    `INSERT INTO users (email, password, name, role, tickets)
-     VALUES ($1, $2, $3, 'admin', 10000)
+    `INSERT INTO users (email, password, name, role)
+     VALUES ($1, $2, $3, 'admin')
      RETURNING id`,
     [email, hashed, name],
   );
@@ -66,7 +66,6 @@ export interface CreateTestEventOptions {
   status?: "scheduled" | "open" | "closed" | "cancelled";
   opensAt?: Date;
   durationMs?: number;
-  entryFeeTickets?: number;
   category?: string;
   registrationDeadline?: Date;
   venueSlug?: string;
@@ -77,7 +76,6 @@ export interface CreateTestEventOptions {
 export interface TestEventResult {
   eventId: number;
   venueSlug: string;
-  entryFeeTickets: number;
 }
 
 /**
@@ -91,7 +89,6 @@ export async function createTestEvent(
   const {
     status         = "scheduled",
     durationMs     = 300000,
-    entryFeeTickets = 500,
     category       = "concert",
     venueSlug      = DEFAULT_VENUE_SLUG,
     seriesId       = null,
@@ -124,22 +121,21 @@ export async function createTestEvent(
   const res = await pool.query(
     `INSERT INTO events
        (type, title, category, venue_id, total_seats, opens_at, closes_at,
-        duration_ms, entry_fee_tickets, registration_deadline, prize,
+        duration_ms, registration_deadline, prize,
         poster_color, poster_initial, status, series_id, created_by)
-     VALUES ('paid', $1, $2, $3, $4, $5, $6, $7, $8, $9, 'test prize', '#123456', 'T', $10, $11, $12)
+     VALUES ('paid', $1, $2, $3, $4, $5, $6, $7, $8, 'test prize', '#123456', 'T', $9, $10, $11)
      RETURNING id`,
     [
       title, category, venueId, totalSeats,
       opensAt.toISOString(), closesAt.toISOString(),
-      durationMs, entryFeeTickets, registrationDeadline.toISOString(),
+      durationMs, registrationDeadline.toISOString(),
       status, seriesId, adminUserId,
     ],
   );
 
   return {
-    eventId:       res.rows[0].id as number,
+    eventId: res.rows[0].id as number,
     venueSlug,
-    entryFeeTickets,
   };
 }
 
@@ -151,16 +147,15 @@ export async function createTestRegistration(
   userId: number,
   opts: {
     status?: string;
-    ticketsPaid?: number;
   } = {},
 ): Promise<{ registrationId: number }> {
-  const { status = "pending", ticketsPaid = 500 } = opts;
+  const { status = "pending" } = opts;
 
   const res = await pool.query(
-    `INSERT INTO event_registrations (event_id, user_id, tickets_paid, status)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO event_registrations (event_id, user_id, status)
+     VALUES ($1, $2, $3)
      RETURNING id`,
-    [eventId, userId, ticketsPaid, status],
+    [eventId, userId, status],
   );
 
   return { registrationId: res.rows[0].id as number };
@@ -173,10 +168,7 @@ export async function cleanupTestEvents(eventIds: number[]): Promise<void> {
   if (eventIds.length === 0) return;
 
   // FK 의존 순서 (역방향 삭제):
-  //   live_seats/live_holds → event_registrations → tickets → live_sessions → events
-  // event_registrations.ticket_id → tickets(id) FK 추가 이후, tickets 삭제 전
-  // event_registrations 를 먼저 지워야 참조 위반 없음. tickets → live_sessions
-  // FK 때문에 tickets 를 live_sessions 보다 먼저.
+  //   live_seats/live_holds → event_registrations → live_sessions → events
   await pool.query(
     `DELETE FROM live_seats WHERE event_id = ANY($1::int[])`,
     [eventIds],
@@ -187,11 +179,6 @@ export async function cleanupTestEvents(eventIds: number[]): Promise<void> {
   );
   await pool.query(
     `DELETE FROM event_registrations WHERE event_id = ANY($1::int[])`,
-    [eventIds],
-  );
-  await pool.query(
-    `DELETE FROM tickets WHERE live_session_id IN
-       (SELECT id FROM live_sessions WHERE event_id = ANY($1::int[]))`,
     [eventIds],
   );
   await pool.query(
@@ -224,16 +211,9 @@ export async function cleanupTestSeries(seriesIds: number[]): Promise<void> {
 
 /** 테스트 유저 삭제 (이메일 접두어 기준) */
 export async function cleanupTestEvUsers(): Promise<void> {
-  // FK 의존 순서: event_registrations → tickets → live_sessions → events → users
-  // event_registrations.ticket_id → tickets(id) FK 추가로 event_registrations 를
-  // tickets 보다 먼저 지워야 참조 위반이 안 남.
+  // FK 의존 순서: event_registrations → live_sessions → events → users
   await pool.query(
     `DELETE FROM event_registrations
-     WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)`,
-    [`${TEST_EV_EMAIL_PREFIX}%`],
-  );
-  await pool.query(
-    `DELETE FROM tickets
      WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)`,
     [`${TEST_EV_EMAIL_PREFIX}%`],
   );
