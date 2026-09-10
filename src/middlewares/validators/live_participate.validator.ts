@@ -72,8 +72,27 @@ const getLastRoundQueryValidator = [
     .withMessage("limit은 1~30 범위의 정수여야 합니다."),
 ];
 
+/**
+ * GET /rounds/:roundId/rankings?page&size
+ *
+ * page 상한을 두지 않는다 — 누적 랭킹과 달리 회차 참가자는 전원 조회 대상이다.
+ * size 상한 100 은 누적 랭킹과 맞춘다 (한 번에 퍼가는 양 제한).
+ */
+const getRoundRankingsQueryValidator = [
+  ...roundIdParamValidator,
+  query("page")
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage("page는 1 이상의 정수여야 합니다."),
+  query("size")
+    .optional()
+    .isInt({ min: 1, max: 100 })
+    .withMessage("size는 1~100 사이의 정수여야 합니다."),
+];
+
 export {
   roundIdParamValidator,
+  getRoundRankingsQueryValidator,
   sessionIdParamValidator,
   createSessionBodyValidator,
   holdBodyValidator,

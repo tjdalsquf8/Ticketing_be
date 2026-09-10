@@ -49,6 +49,11 @@ const runTransition = async () => {
  * 한 번에 최대 20개까지 처리한다.
  *
  * setInterval 200ms 로 등록되어 대기열이 거의 실시간으로 소진된다.
+ *
+ * started_at 은 승격 시 건드리지 않는다. 소요 시간(elapsed_ms) 정의가
+ * "대기실 입장(세션 생성) 부터 좌석 확정까지" 라서 대기열에서 기다린 시간도
+ * 기록에 포함되어야 하기 때문이다. 예전에는 여기서 started_at = NOW() 로
+ * 재설정해 대기 시간을 기록에서 빼고 있었다.
  */
 const promoteQueuedSessions = async (): Promise<void> => {
   // open 회차별 active 수와 queued 수를 한 번에 조회
@@ -74,8 +79,7 @@ const promoteQueuedSessions = async (): Promise<void> => {
     await pool.query(
       `UPDATE live_sessions
        SET status = 'active',
-           queue_position = NULL,
-           started_at = NOW()
+           queue_position = NULL
        WHERE id IN (
          SELECT id FROM live_sessions
          WHERE round_id = $1 AND status = 'queued'

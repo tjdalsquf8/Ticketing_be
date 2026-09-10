@@ -521,7 +521,8 @@ async function holdSeat(params: {
  * 사용자가 "결제/확정" 버튼을 누를 때 호출한다.
  * - hold 가 만료되지 않았는지 확인한다.
  * - 좌석 상태를 sold 로 변경하고 hold 를 삭제한다.
- * - 세션을 completed 로 처리하고 경과 시간을 기록한다.
+ * - 세션을 completed 로 처리하고 경과 시간을 기록한다
+ *   (started_at = 대기실 입장 시각 ~ confirm 처리 시각, 대기열 대기 시간 포함).
  * - 해당 회차 내 완료 순위(elapsed_ms ASC)를 계산한다.
  * - 이벤트 세션이면 event_registrations 를 ticketed 로 전이한다.
  * - 반환값: 순위, 경과 시간.
@@ -579,7 +580,9 @@ async function confirmSeat(params: {
 
   const actorKey = buildActorKey(userId, guestUuid);
 
-  // 서버 경과 시간 계산 (클라이언트 값 무시 — 조작 방어)
+  // 서버 경과 시간 계산 (클라이언트 값 무시 — 조작 방어).
+  // 구간은 started_at(대기실 입장 = 세션 생성 시각) 부터 지금까지다. 대기열에서
+  // 기다린 시간도 포함된다 — 실제 티켓팅 체감과 맞추기 위한 정의다.
   const serverElapsedMs = Math.max(
     0,
     Date.now() - new Date(session.started_at).getTime(),

@@ -69,4 +69,54 @@ const getRoundById = async (req: Request, res: Response, next: NextFunction) => 
   }
 };
 
-export { getCurrent, getNext, getLastRound, getRoundById };
+// GET /api/live/rounds/:roundId/rankings?page&size — 회차 단위 랭킹 (공개, 인증 불필요)
+//
+// 누적 랭킹(GET /api/rankings)과 달리 period 파라미터가 없다. 회차가 곧 기간이다.
+// 요청자 본인 행(me)은 페이지 밖이어도 항상 함께 내려간다.
+const getRoundRankings = async (req: Request, res: Response, next: NextFunction) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return next(new AppError(422, "VALIDATION_ERROR", errors.array()[0].msg));
+  }
+
+  try {
+    const roundId = parseInt(req.params["roundId"] as string, 10);
+    const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+    const size = req.query.size ? parseInt(req.query.size as string, 10) : 20;
+
+    // 게스트 식별은 httpOnly 쿠키만 신뢰한다 (참여 API 와 동일 정책).
+    // identity 형식은 live_sessions 의 COALESCE(user_id::text, guest_uuid) 와 같아야 한다.
+    const userId = req.user?.id ?? null;
+    const identity =
+      userId != null
+        ? String(userId)
+        : ((req.cookies?.guest_uuid as string | undefined) ?? null);
+
+    const result = await liveService.getRoundRankings(roundId, {
+      page,
+      size,
+      identity,
+    });
+
+    if (result === null) {
+      return next(new AppError(404, "ROUND_NOT_FOUND", "존재하지 않는 회차입니다."));
+    }
+
+    res.status(200).json({
+      success: true,
+      data: result.data,
+      me: result.me,
+      meta: {
+        page,
+        size,
+        totalCount: result.totalCount,
+        roundId,
+        roundStatus: result.roundStatus,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export { getCurrent, getNext, getLastRound, getRoundById, getRoundRankings };

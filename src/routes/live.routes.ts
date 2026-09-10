@@ -5,6 +5,7 @@ import { liveLimiter } from "../middlewares/rateLimiter";
 import optionalAuthMiddleware from "../middlewares/optionalAuthMiddleware";
 import {
   roundIdParamValidator,
+  getRoundRankingsQueryValidator,
   sessionIdParamValidator,
   createSessionBodyValidator,
   holdBodyValidator,
@@ -25,6 +26,11 @@ router.get("/current", liveController.getCurrent);
 router.get("/next", liveController.getNext);
 router.get("/last-round", getLastRoundQueryValidator, liveController.getLastRound);
 router.get("/rounds/:roundId", roundIdParamValidator, liveController.getRoundById);
+router.get(
+  "/rounds/:roundId/rankings",
+  getRoundRankingsQueryValidator,
+  liveController.getRoundRankings,
+);
 
 // ─── 참여 API 라우트 ──────────────────────────────────────────────────────────
 router.post(

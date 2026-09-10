@@ -245,6 +245,108 @@ const getMyParticipation = async (
   };
 };
 
+// ─── 회차 단위 랭킹 ───────────────────────────────────────────────────────────
+
+export type RoundRankingRow = {
+  rank: number;
+  nickname: string;
+  elapsed_ms: number;
+  is_verified: boolean;
+  seat_label: string | null;
+};
+
+export type RoundRankingsResult = {
+  data: RoundRankingRow[];
+  me: RoundRankingRow | null;
+  roundStatus: string;
+  totalCount: number;
+};
+
+/**
+ * 특정 회차의 완주자 순위.
+ *
+ * 누적 랭킹(rankings.service)과 다른 점:
+ *   - 기간(period) 개념이 없다. 회차 자체가 시간 범위다.
+ *   - identity 별 MIN(elapsed_ms) 집계가 필요 없다.
+ *     `uq_live_sessions_round_user_active` / `uq_live_sessions_round_guest_active`
+ *     부분 유니크 인덱스가 (회차, 참가자) 조합을 1행으로 강제하므로 row 가 곧 기록이다.
+ *   - 닉네임 스냅샷 문제가 없다. 그 회차에서 쓴 이름이 그대로 그 회차의 이름이다.
+ *   - 상위 100위 상한을 두지 않는다. 회차 참가자는 전원 조회 가능해야 한다.
+ *
+ * 동률은 RANK() 라 같은 등수를 공유한다(누적 랭킹과 동일 정책).
+ * 표시 순서만 completed_at ASC 로 갈라 먼저 확정한 쪽을 위에 둔다.
+ *
+ * `me` 는 페이지 범위 밖이어도 항상 채운다. identity 가 없거나(비로그인 + 쿠키 없음)
+ * 그 회차를 완주하지 않았으면 null.
+ */
+const getRoundRankings = async (
+  roundId: number,
+  params: { page: number; size: number; identity: string | null },
+): Promise<RoundRankingsResult | null> => {
+  const { page, size, identity } = params;
+
+  const roundRes = await pool.query(
+    `SELECT status FROM live_rounds WHERE id = $1`,
+    [roundId],
+  );
+  if (roundRes.rows.length === 0) return null;
+
+  // 회차 완주자 전체에 순위를 매기는 공통 CTE.
+  // me 조회에서도 같은 순위 정의를 써야 목록의 등수와 어긋나지 않는다.
+  const rankedCte = `
+    WITH ranked AS (
+      SELECT
+        -- ::int 캐스트 필수. RANK 는 bigint 라 캐스트 없으면 JSON 에 문자열로 나간다.
+        (RANK() OVER (ORDER BY elapsed_ms ASC))::int AS rank,
+        nickname,
+        elapsed_ms,
+        (user_id IS NOT NULL) AS is_verified,
+        seat_label,
+        completed_at,
+        COALESCE(user_id::text, guest_uuid) AS identity
+      FROM live_sessions
+      WHERE round_id = $1 AND status = 'completed'
+    )`;
+
+  const offset = (page - 1) * size;
+
+  const [listRes, countRes] = await Promise.all([
+    pool.query(
+      `${rankedCte}
+       SELECT rank, nickname, elapsed_ms, is_verified, seat_label
+       FROM ranked
+       ORDER BY rank ASC, completed_at ASC
+       LIMIT $2 OFFSET $3`,
+      [roundId, size, offset],
+    ),
+    pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM live_sessions
+       WHERE round_id = $1 AND status = 'completed'`,
+      [roundId],
+    ),
+  ]);
+
+  let me: RoundRankingRow | null = null;
+  if (identity !== null) {
+    const meRes = await pool.query(
+      `${rankedCte}
+       SELECT rank, nickname, elapsed_ms, is_verified, seat_label
+       FROM ranked
+       WHERE identity = $2`,
+      [roundId, identity],
+    );
+    me = meRes.rows[0] ?? null;
+  }
+
+  return {
+    data: listRes.rows,
+    me,
+    roundStatus: roundRes.rows[0].status as string,
+    totalCount: countRes.rows[0].total as number,
+  };
+};
+
 // ─── 관리자 통계 ─────────────────────────────────────────────────────────────
 
 export interface RoundStatsRow {
@@ -312,6 +414,7 @@ export {
   getNext,
   getLastRoundTopN,
   getRoundById,
+  getRoundRankings,
   getMyParticipation,
   getRoundStats,
 };
