@@ -51,7 +51,19 @@ const getRoundById = async (req: Request, res: Response, next: NextFunction) => 
       return next(new AppError(404, "ROUND_NOT_FOUND", "존재하지 않는 회차입니다."));
     }
 
-    res.status(200).json({ success: true, data });
+    // 이미 참여한 회차를 다시 열었을 때 프론트가 진입 버튼을 사전 차단할 수 있도록
+    // 요청자 기준 참여 여부를 함께 싣는다. 라우터의 optionalAuthMiddleware 가
+    // req.user 를 채워두므로 비로그인은 guest_uuid 쿠키로만 식별한다.
+    // 게스트 식별은 httpOnly 쿠키만 신뢰한다 (참여 API 와 동일 정책).
+    const userId = req.user?.id ?? null;
+    const guestUuid =
+      userId == null ? (req.cookies?.guest_uuid as string | undefined) : undefined;
+    const myParticipation = await liveService.getMyParticipation(roundId, {
+      userId,
+      guestUuid,
+    });
+
+    res.status(200).json({ success: true, data: { ...data, myParticipation } });
   } catch (err) {
     next(err);
   }

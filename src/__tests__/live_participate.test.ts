@@ -86,7 +86,7 @@ describe("Live Participate API", () => {
         .post(`/api/live/rounds/${roundId}/sessions`)
         .set("Content-Type", "application/json")
         .set("Cookie", `guest_uuid=${guestUuid}`)
-        .send({ nickname: "guest_tester" });
+        .send({ nickname: "guest_test" });
 
       expect(res.status).toBe(201);
       expect(res.body.data.sessionId).toBeDefined();
@@ -162,7 +162,7 @@ describe("Live Participate API", () => {
       const { email, password } = await createTestUser();
       const agent = await loginAgent(email, password);
 
-      const customNickname = "__tlv_custom_nick";
+      const customNickname = "__tlv_cust";
       const res = await agent
         .post(`/api/live/rounds/${roundId}/sessions`)
         .set("Content-Type", "application/json")
@@ -214,7 +214,7 @@ describe("Live Participate API", () => {
       const res = await agent
         .post(`/api/live/rounds/${roundId}/sessions`)
         .set("Content-Type", "application/json")
-        .send({ nickname: "overflow_tester" });
+        .send({ nickname: "overflow" });
 
       expect(res.status).toBe(201);
       expect(res.body.data.status).toBe("queued");
@@ -479,7 +479,7 @@ describe("Live Participate API", () => {
       const createRes = await agent
         .post(`/api/live/rounds/${roundId}/sessions`)
         .set("Content-Type", "application/json")
-        .send({ nickname: "ticket_buyer" });
+        .send({ nickname: "seat_buyer" });
 
       const { sessionId } = createRes.body.data;
 
@@ -523,7 +523,7 @@ describe("Live Participate API", () => {
         .post(`/api/live/rounds/${roundId}/sessions`)
         .set("Content-Type", "application/json")
         .set("Cookie", `guest_uuid=${guestUuid}`)
-        .send({ nickname: "guest_buyer" });
+        .send({ nickname: "g_buyer" });
 
       const { sessionId } = createRes.body.data;
 

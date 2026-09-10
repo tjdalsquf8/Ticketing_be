@@ -33,4 +33,15 @@ const getMyRankingsValidator = [
   query("eventId").optional().isInt({ min: 1 }).withMessage("eventId는 1 이상의 정수여야 합니다."),
 ];
 
-export { getRankingsValidator, getMyRankingsValidator };
+// GET /api/rankings/me/best — 인증 불필요, page/size 없음
+const getMyBestRankingValidator = [
+  query("mode")
+    .notEmpty().withMessage("mode는 필수입니다.")
+    .isIn(["practice", "live"]).withMessage("mode는 practice, live 중 하나여야 합니다."),
+  query("period")
+    .notEmpty().withMessage("period는 필수입니다.")
+    .isIn(["daily", "weekly", "monthly"]).withMessage("period는 daily, weekly, monthly 중 하나여야 합니다."),
+  query("eventId").optional().isInt({ min: 1 }).withMessage("eventId는 1 이상의 정수여야 합니다."),
+];
+
+export { getRankingsValidator, getMyRankingsValidator, getMyBestRankingValidator };

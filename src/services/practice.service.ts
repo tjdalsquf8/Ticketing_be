@@ -4,36 +4,6 @@ import { AppError } from "../middlewares/errorHandler";
 
 const generateSessionId = () => `prc_${randomBytes(8).toString("hex")}`;
 
-// 게스트 UUID의 최초 닉네임 조회 (immutability 기준 값)
-const getEarliestNicknameByUuid = async (
-  guestUuid: string,
-): Promise<string | null> => {
-  const result = await pool.query(
-    `SELECT nickname FROM practice_sessions
-     WHERE guest_uuid = $1
-     ORDER BY started_at ASC
-     LIMIT 1`,
-    [guestUuid],
-  );
-  return result.rows[0]?.nickname ?? null;
-};
-
-// 비로그인 유저의 nickname 소유권을 확인 (최초 UUID만 정식 소유자)
-const isNicknameOwnedByOther = async (
-  nickname: string,
-  requesterUuid: string,
-): Promise<boolean> => {
-  const result = await pool.query(
-    `SELECT guest_uuid FROM practice_sessions
-     WHERE nickname = $1 AND guest_uuid IS NOT NULL AND user_id IS NULL
-     ORDER BY started_at ASC
-     LIMIT 1`,
-    [nickname],
-  );
-  const ownerUuid = result.rows[0]?.guest_uuid;
-  return !!ownerUuid && ownerUuid !== requesterUuid;
-};
-
 const startSession = async (params: {
   userId?: number;
   guestUuid?: string;
@@ -44,46 +14,28 @@ const startSession = async (params: {
   const { userId, guestUuid, nickname, mode, eventId } = params;
   const sessionId = generateSessionId();
 
-  // 닉네임 immutability: 게스트가 기존에 세션 있으면 최초 닉네임으로 강제
-  let effectiveNickname = nickname;
-  if (!userId && guestUuid) {
-    const priorNickname = await getEarliestNicknameByUuid(guestUuid);
-    if (priorNickname) {
-      effectiveNickname = priorNickname;
-    } else if (!nickname) {
-      // 쿠키 UUID는 있지만 이력 없음(30일 크론 삭제 등) + 신규 닉 미제공
-      throw new AppError(
-        400,
-        "NICKNAME_REQUIRED",
-        "닉네임이 필요합니다.",
-      );
-    }
-  }
-
-  // 소유권 판정: 로그인 유저는 항상 true, 비로그인은 최초 UUID만 true
-  let rankingEligible = true;
-  if (!userId && guestUuid) {
-    const isImpostor = await isNicknameOwnedByOther(effectiveNickname, guestUuid);
-    if (isImpostor) rankingEligible = false;
+  // 게스트는 닉네임을 자유롭게 바꿀 수 있다. 요청으로 들어온 값을 그대로 저장하고,
+  // 세션 row 의 nickname 은 그 시점 스냅샷으로 남는다.
+  // (리더보드 표시명 = 최고기록 시점 닉네임 — rankings.service.ts BEST_RECORD_NICKNAME 참고)
+  //
+  // 예전에는 여기서 그 guest_uuid 의 최초 세션 닉네임으로 요청값을 덮어썼다(immutability).
+  // "닉네임 변경 = guest_uuid 리셋" 이던 구조에서 랭킹 조작을 막던 장치인데,
+  // 이제 신원(guest_uuid)이 유지된 채 개명이 허용되므로 전제가 사라졌다.
+  // 남겨두면 게스트가 닉네임을 영구히 못 바꾸게 된다.
+  if (!userId && guestUuid && !nickname) {
+    // 쿠키는 있는데 닉네임 미제공
+    throw new AppError(400, "NICKNAME_REQUIRED", "닉네임이 필요합니다.");
   }
 
   const result = await pool.query(
     `INSERT INTO practice_sessions
-       (session_id, user_id, guest_uuid, nickname, mode, event_id, ranking_eligible)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (session_id, user_id, guest_uuid, nickname, mode, event_id)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING session_id, started_at`,
-    [
-      sessionId,
-      userId ?? null,
-      guestUuid ?? null,
-      effectiveNickname,
-      mode,
-      eventId ?? null,
-      rankingEligible,
-    ],
+    [sessionId, userId ?? null, guestUuid ?? null, nickname, mode, eventId ?? null],
   );
 
-  return { ...result.rows[0], nickname: effectiveNickname };
+  return { ...result.rows[0], nickname };
 };
 
 const completeSession = async (params: {
@@ -131,6 +83,9 @@ const completeSession = async (params: {
   );
 
   const elapsedMs = completed.rows[0].elapsed_ms;
+  // ranking_eligible 은 DB DEFAULT true 로 들어온다. 서비스 코드가 false 로 쓰는
+  // 경로는 더 이상 없고(닉네임 사칭 게이팅 제거), 운영자가 개별 기록을 랭킹에서
+  // 뺄 때 쓰는 수동 플래그로만 남는다.
   const ranked: boolean = s.ranking_eligible;
 
   if (!ranked) {

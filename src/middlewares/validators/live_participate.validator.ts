@@ -24,13 +24,20 @@ const sessionIdParamValidator = [
     .withMessage("sessionId 형식이 올바르지 않습니다."),
 ];
 
-/** POST /rounds/:roundId/sessions body */
+/**
+ * POST /rounds/:roundId/sessions body
+ *
+ * 규칙은 guests·practice 의 nickname 과 동일하게 맞춘다.
+ * 여기만 길이·문자셋이 느슨하면 게스트 발급 쪽 검증을 세워도 라이브 참여 시
+ * nickname 을 직접 실어 보내는 경로로 그대로 우회된다 (제로폭 문자 등).
+ */
 const createSessionBodyValidator = [
   body("nickname")
     .optional()
     .trim()
-    .isLength({ min: 1, max: 30 })
-    .withMessage("nickname은 1~30자여야 합니다."),
+    .isLength({ min: 2, max: 10 }).withMessage("닉네임은 2~10자여야 합니다.")
+    .matches(/^[가-힣a-zA-Z0-9_-]+$/)
+    .withMessage("닉네임은 한글, 영문, 숫자, _, - 만 사용 가능합니다."),
 ];
 
 /** POST /sessions/:sessionId/hold body */

@@ -3,19 +3,7 @@ import { randomUUID } from "crypto";
 import { validationResult } from "express-validator";
 import * as guestsService from "../services/guests.service";
 import { AppError } from "../middlewares/errorHandler";
-import config from "../config";
-
-const GUEST_UUID_COOKIE_MAX_AGE = 365 * 24 * 60 * 60 * 1000;
-
-const setGuestCookie = (res: Response, guestUuid: string) => {
-  res.cookie("guest_uuid", guestUuid, {
-    httpOnly: true,
-    secure: config.nodeEnv === "production",
-    sameSite: "lax",
-    maxAge: GUEST_UUID_COOKIE_MAX_AGE,
-    path: "/",
-  });
-};
+import { setGuestCookie } from "../utils/guestCookie";
 
 /**
  * POST /api/guests
@@ -23,7 +11,7 @@ const setGuestCookie = (res: Response, guestUuid: string) => {
  * 게스트 UUID를 발급하고 guest_uuid HttpOnly 쿠키에 세팅한다.
  * - 쿠키 없음: 신규 UUID 발급 후 guests 테이블에 INSERT
  * - 쿠키 있음: 기존 UUID 유지, body에 nickname이 오면 guests 테이블 UPDATE로 반영
- * Body: { nickname?: string } — 선택적, 1~30자
+ * Body: { nickname?: string } — 선택적, 2~10자 + [가-힣a-zA-Z0-9_-]
  */
 const postGuest = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -75,47 +63,4 @@ const getMe = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
-// 게스트 정체성 초기화 (닉네임 변경 시 사용)
-// - guest_uuid 쿠키 삭제 → 다음 세션 시작 시 새 UUID 발급됨
-// - 기존 세션 데이터는 DB에 남아있으며 30일 후 크론이 정리 (유령 UUID)
-//
-// 랭킹 조작 방지: 마지막 닉네임 변경 후 1시간 이내 재변경(= 쿠키 리셋 요청) 차단.
-// httpOnly 쿠키 정책상 프론트 UI 로 정상 flow 는 이미 막혀 있으나 개발자도구·직접
-// API 호출 우회에 대비해 서버가 최종 방어선을 제공한다.
-const NICKNAME_CHANGE_COOLDOWN_MS = 60 * 60 * 1000; // 1시간
-
-const deleteMe = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const guestUuid = req.cookies?.guest_uuid as string | undefined;
-
-    // 쿠키가 이미 없으면 idempotent 하게 200. 아무 것도 삭제할 것 없음.
-    if (!guestUuid) {
-      return res.status(200).json({ success: true, data: null });
-    }
-
-    const nicknameChangedAt = await guestsService.getNicknameChangedAt(guestUuid);
-
-    // guests row 가 없다 = 이미 크론이 정리한 유령. 쿠키만 정리하고 통과.
-    if (nicknameChangedAt !== null) {
-      const elapsedMs = Date.now() - nicknameChangedAt.getTime();
-      if (elapsedMs < NICKNAME_CHANGE_COOLDOWN_MS) {
-        const retryAfterSeconds = Math.ceil((NICKNAME_CHANGE_COOLDOWN_MS - elapsedMs) / 1000);
-        res.setHeader("Retry-After", retryAfterSeconds.toString());
-        return next(
-          new AppError(
-            429,
-            "NICKNAME_CHANGE_TOO_SOON",
-            `닉네임 변경은 최소 1시간 후 가능합니다. ${retryAfterSeconds}초 후 다시 시도해주세요.`,
-          ),
-        );
-      }
-    }
-
-    res.clearCookie("guest_uuid", { path: "/" });
-    res.status(200).json({ success: true, data: null });
-  } catch (err) {
-    next(err);
-  }
-};
-
-export { postGuest, getMe, deleteMe };
+export { postGuest, getMe };

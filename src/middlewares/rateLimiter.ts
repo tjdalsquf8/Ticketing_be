@@ -48,6 +48,45 @@ export const refreshLimiter = rateLimit({
   ),
 });
 
+// 게스트 신규 발급(`POST /api/guests`, 쿠키 없는 요청) 전용.
+// 쿠키 없이 반복 호출하면 매번 새 UUID + guests 행이 INSERT 되므로, 전역 백스톱
+// (1000/분/IP)만으로는 단일 IP 가 분당 1000행씩 무한 적재할 수 있었다.
+// 로그인(15분 5회)·회원가입(1시간 5회)은 보호되는데 게스트 발급만 비어 있던 공백을 메운다.
+// 20/시간은 같은 NAT 뒤 신규 방문자 여러 명이 각자 1회씩 발급받는 정상 트래픽은 통과시키면서
+// 대량 적재는 하루 480행/IP 로 묶는 수준.
+export const guestIssueLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  // 이미 쿠키가 있는 요청은 신규 발급이 아니라 닉네임 갱신이므로 여기서 세지 않는다
+  // (guestNicknameLimiter 담당).
+  skip: (req: Request) => skipInTest() || Boolean(req.cookies?.guest_uuid),
+  keyGenerator: (req: Request, res: Response) => ipKeyGenerator(req.ip ?? "unknown"),
+  handler: envelopeHandler(
+    "TOO_MANY_GUEST_ISSUES",
+    "게스트 발급 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
+  ),
+});
+
+// 게스트 닉네임 갱신(`POST /api/guests`, 쿠키 있는 요청) 전용.
+// 쿠키가 있으면 같은 guest_uuid 를 유지한 채 nickname 만 바뀐다. 쿨다운 정책을 없앤
+// 자리를 메우는 최소 방어선으로, 게스트 단위로 카운트해 같은 IP 의 다른 게스트에게
+// 영향이 없도록 한다.
+export const guestNicknameLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req: Request) => skipInTest() || !req.cookies?.guest_uuid,
+  keyGenerator: (req: Request, res: Response) =>
+    `guest-nickname:${req.cookies.guest_uuid as string}`,
+  handler: envelopeHandler(
+    "TOO_MANY_NICKNAME_CHANGES",
+    "닉네임 변경 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
+  ),
+});
+
 // 전역 백스톱. 라우트별 리미터가 실제 정책을 담당하고, 이 리미터는 그 위에서
 // 봇/스크립트의 비정상 트래픽만 잘라내는 최후 방어선 역할만 한다.
 // 100/min(=초당 1.7회)은 홈 1회 로드가 8요청인 구조에서 정상 사용자를 먼저 막았다.
@@ -105,18 +144,24 @@ export const timeLimiter = rateLimit({
   ),
 });
 
-// 내 기록 조회(`/api/rankings/me`) 전용. 인증 유저 기준으로 카운트하므로 반드시
-// authMiddleware 뒤에 배치해야 한다. 앞에 두면 req.user 가 아직 없어 IP 키로 떨어진다.
+// 내 기록 조회(`/api/rankings/me`) 전용. 요청자 기준으로 카운트하므로 반드시
+// 인증 파싱 미들웨어 뒤에 배치해야 한다. 앞에 두면 req.user 가 아직 없어 IP 키로 떨어진다.
+//
+// 키 우선순위: 로그인 유저 id → 게스트 uuid 쿠키 → IP.
+// 게스트도 자기 기록을 조회하므로 guest_uuid 까지 키로 인정해야 NAT 뒤 게스트끼리
+// 서로 예산을 잡아먹지 않는다 (liveLimiter 와 같은 정책).
 export const rankingsLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipInTest,
-  keyGenerator: (req: Request, res: Response) =>
-    req.user?.id
-      ? `rankings:${req.user.id}`
-      : ipKeyGenerator(req.ip ?? "unknown"),
+  keyGenerator: (req: Request, res: Response) => {
+    if (req.user?.id) return `rankings:u${req.user.id}`;
+    const guestUuid = req.cookies?.guest_uuid as string | undefined;
+    if (guestUuid) return `rankings:g${guestUuid}`;
+    return ipKeyGenerator(req.ip ?? "unknown");
+  },
   handler: envelopeHandler(
     "TOO_MANY_RANKING_REQUESTS",
     "랭킹 조회 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
