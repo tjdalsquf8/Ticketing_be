@@ -4,19 +4,7 @@ import * as practiceService from "../services/practice.service";
 import * as usersService from "../services/users.service";
 import { validationResult } from "express-validator";
 import { AppError } from "../middlewares/errorHandler";
-import config from "../config";
-
-const GUEST_UUID_COOKIE_MAX_AGE = 365 * 24 * 60 * 60 * 1000;
-
-const setGuestCookie = (res: Response, guestUuid: string) => {
-  res.cookie("guest_uuid", guestUuid, {
-    httpOnly: true,
-    secure: config.nodeEnv === "production",
-    sameSite: "strict",
-    maxAge: GUEST_UUID_COOKIE_MAX_AGE,
-    path: "/",
-  });
-};
+import { setGuestCookie } from "../utils/guestCookie";
 
 const startSession = async (
   req: Request,

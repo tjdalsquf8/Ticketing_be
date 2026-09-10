@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict zPgWL4VBjm8ZnuvnD0VEF5JHn4RyEfJ4Cm4qOfJ7ikinOwUdyQ1en1blBXRfv6d
+\restrict Ngng7tiX8ucHiOPrvNFC0IJjTTJpAZx6wJ89ykbuIYKPiyW8ImaXswVuSGwrt1I
 
 -- Dumped from database version 16.13 (Postgres.app)
 -- Dumped by pg_dump version 18.4
@@ -1256,13 +1256,6 @@ CREATE UNIQUE INDEX uq_live_sessions_round_guest_active ON public.live_sessions 
 
 
 --
--- Name: uq_live_sessions_round_nickname_guest; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_live_sessions_round_nickname_guest ON public.live_sessions USING btree (round_id, nickname) WHERE ((guest_uuid IS NOT NULL) AND ((status)::text = ANY ((ARRAY['queued'::character varying, 'active'::character varying, 'completed'::character varying])::text[])));
-
-
---
 -- Name: uq_live_sessions_round_user_active; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1481,5 +1474,5 @@ ALTER TABLE ONLY public.practice_sessions
 -- PostgreSQL database dump complete
 --
 
-\unrestrict zPgWL4VBjm8ZnuvnD0VEF5JHn4RyEfJ4Cm4qOfJ7ikinOwUdyQ1en1blBXRfv6d
+\unrestrict Ngng7tiX8ucHiOPrvNFC0IJjTTJpAZx6wJ89ykbuIYKPiyW8ImaXswVuSGwrt1I
 

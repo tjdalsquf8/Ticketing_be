@@ -1,10 +1,12 @@
 /**
- * 회차 내 게스트 닉네임 중복 사전 차단 (POST /api/live/rounds/:roundId/sessions)
+ * 회차 내 게스트 닉네임 중복 허용 (POST /api/live/rounds/:roundId/sessions)
  *
- * - 같은 회차에서 다른 게스트가 이미 쓰는 닉네임이면 409 NICKNAME_TAKEN_IN_ROUND
- * - 스코프는 회차(round) 단위 — 다른 회차에서는 재사용 가능
- * - 같은 게스트의 재요청(동일 닉네임)은 기존 세션을 그대로 반환 (차단 아님)
- * - 회원 닉네임은 대상 아님 (게스트만 검사)
+ * - 같은 회차에서 다른 게스트가 이미 쓰는 닉네임이어도 참여할 수 있다 (201)
+ *   · 신원은 guest_uuid 로 구분되고, 본인 기록·등수는 자기 세션 기준으로 조회된다
+ *   · 회귀 방지: 예전에는 409 NICKNAME_TAKEN_IN_ROUND 로 거절했고,
+ *     uq_live_sessions_round_nickname_guest 유니크 인덱스가 이를 강제했다
+ * - 같은 게스트의 재요청(동일 닉네임)은 기존 세션을 그대로 반환 (중복 참여 방지)
+ * - 회원 닉네임도 게스트 닉네임과 겹칠 수 있다
  */
 
 import request from "supertest";
@@ -27,16 +29,20 @@ async function loginAgent(email: string, password: string) {
   return agent;
 }
 
-describe("회차 내 게스트 닉네임 중복 차단", () => {
+// 닉네임은 2~10자 제한이 있어 Date.now() 를 그대로 붙이면 길이를 넘긴다.
+// base36 하위 6자리면 테스트 실행 간 충돌 없이 접두어와 합쳐 10자 안에 들어온다.
+const uniqueSuffix = () => Date.now().toString(36).slice(-6);
+
+describe("회차 내 게스트 닉네임 중복 허용", () => {
   afterAll(async () => {
     await cleanupTestLiveUsers();
     await cleanupTestRounds(createdRoundIds);
   });
 
-  it("다른 게스트가 같은 회차에서 이미 쓰는 닉네임이면 409를 반환한다", async () => {
+  it("다른 게스트가 같은 회차에서 이미 쓰는 닉네임이어도 참여할 수 있다", async () => {
     const round = await createTestRound();
     createdRoundIds.push(round.roundId);
-    const nickname = `dup_${Date.now()}`;
+    const nickname = `dup${uniqueSuffix()}`;
 
     const guestA = request.agent(app);
     await guestA.post("/api/guests").set("Content-Type", "application/json").send({});
@@ -54,15 +60,16 @@ describe("회차 내 게스트 닉네임 중복 차단", () => {
       .post(`/api/live/rounds/${round.roundId}/sessions`)
       .set("Content-Type", "application/json")
       .send({ nickname });
-    expect(secondRes.status).toBe(409);
-    expect(secondRes.body.error.code).toBe("NICKNAME_TAKEN_IN_ROUND");
+    expect(secondRes.status).toBe(201);
+    // 별개의 세션이어야 한다 (같은 게스트로 합쳐지면 안 됨)
+    expect(secondRes.body.data.sessionId).not.toBe(firstRes.body.data.sessionId);
   });
 
-  it("다른 회차에서는 같은 닉네임을 재사용할 수 있다", async () => {
+  it("다른 회차에서도 같은 닉네임을 쓸 수 있다", async () => {
     const roundX = await createTestRound();
     const roundY = await createTestRound();
     createdRoundIds.push(roundX.roundId, roundY.roundId);
-    const nickname = `scope_${Date.now()}`;
+    const nickname = `scp${uniqueSuffix()}`;
 
     const guestA = request.agent(app);
     await guestA.post("/api/guests").set("Content-Type", "application/json").send({});
@@ -81,10 +88,10 @@ describe("회차 내 게스트 닉네임 중복 차단", () => {
     expect(resY.status).toBe(201);
   });
 
-  it("같은 게스트가 재요청하면 차단 없이 기존 세션을 반환한다", async () => {
+  it("같은 게스트가 재요청하면 기존 세션을 그대로 반환한다", async () => {
     const round = await createTestRound();
     createdRoundIds.push(round.roundId);
-    const nickname = `retry_${Date.now()}`;
+    const nickname = `rty${uniqueSuffix()}`;
 
     const guest = request.agent(app);
     await guest.post("/api/guests").set("Content-Type", "application/json").send({});
@@ -103,10 +110,10 @@ describe("회차 내 게스트 닉네임 중복 차단", () => {
     expect(secondRes.body.data.sessionId).toBe(firstRes.body.data.sessionId);
   });
 
-  it("회원 닉네임은 게스트 닉네임과 겹쳐도 차단되지 않는다", async () => {
+  it("회원 닉네임도 게스트 닉네임과 겹칠 수 있다", async () => {
     const round = await createTestRound();
     createdRoundIds.push(round.roundId);
-    const nickname = `member_${Date.now()}`;
+    const nickname = `mbr${uniqueSuffix()}`;
 
     const guest = request.agent(app);
     await guest.post("/api/guests").set("Content-Type", "application/json").send({});

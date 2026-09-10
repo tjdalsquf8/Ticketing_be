@@ -31,85 +31,83 @@ describe("Practice API", () => {
     });
   });
 
-  describe("[2] 닉네임 immutability", () => {
-    it("같은 쿠키(UUID)로 다른 닉네임 보내도 원래 닉네임으로 강제된다", async () => {
-      const originalNickname = uniqueNickname();
-      const attemptedNickname = uniqueNickname();
+  describe("[2] 닉네임 변경", () => {
+    it("같은 쿠키(UUID)로 다른 닉네임 보내면 새 닉네임이 그대로 저장된다", async () => {
+      // 회귀 방지: 예전에는 그 UUID 의 최초 세션 닉네임으로 요청값을 덮어써서
+      // (immutability) 게스트가 닉네임을 영구히 바꿀 수 없었다.
+      const firstNickname = uniqueNickname();
+      const newNickname = uniqueNickname();
       const agent = request.agent(app);
 
       const res1 = await agent
         .post("/api/practice/sessions")
         .set("Content-Type", "application/json")
-        .send({ mode: "practice", nickname: originalNickname });
+        .send({ mode: "practice", nickname: firstNickname });
       expect(res1.status).toBe(201);
-      expect(res1.body.data.nickname).toBe(originalNickname);
+      expect(res1.body.data.nickname).toBe(firstNickname);
 
       const res2 = await agent
         .post("/api/practice/sessions")
         .set("Content-Type", "application/json")
-        .send({ mode: "practice", nickname: attemptedNickname });
+        .send({ mode: "practice", nickname: newNickname });
       expect(res2.status).toBe(201);
-      // ✅ 프론트가 다른 닉 보내도 백엔드가 원래 닉으로 override
-      expect(res2.body.data.nickname).toBe(originalNickname);
+      expect(res2.body.data.nickname).toBe(newNickname);
+
+      const db = await pool.query(
+        `SELECT nickname FROM practice_sessions WHERE session_id = $1`,
+        [res2.body.data.sessionId],
+      );
+      expect(db.rows[0].nickname).toBe(newNickname);
     });
   });
 
-  describe("[3] 소유권 체크 (impostor)", () => {
-    it("다른 게스트(UUID)가 같은 닉네임으로 세션 생성 시 ranking_eligible=false로 저장된다", async () => {
+  describe("[3] 닉네임 중복", () => {
+    it("다른 게스트(UUID)가 같은 닉네임을 써도 ranking_eligible=true 로 저장된다", async () => {
+      // 회귀 방지: 예전에는 그 닉네임을 먼저 쓴 guest_uuid 가 아니면 사칭으로 보고
+      // ranking_eligible=false 로 랭킹에서 제외했다. 개명이 자유로워진 지금은
+      // 남이 버린 닉네임을 골랐을 뿐인 유저의 기록까지 조용히 사라지는 오탐이 된다.
       const nickname = uniqueNickname();
-      const agentOwner = request.agent(app);
-      const agentImpostor = request.agent(app);
+      const agentA = request.agent(app);
+      const agentB = request.agent(app);
 
-      // Owner: 최초 소유자
-      const resOwner = await agentOwner
+      const resA = await agentA
         .post("/api/practice/sessions")
         .set("Content-Type", "application/json")
         .send({ mode: "practice", nickname });
-      expect(resOwner.status).toBe(201);
+      expect(resA.status).toBe(201);
 
-      // Owner의 세션은 ranking_eligible = true
-      const ownerSessionId = resOwner.body.data.sessionId;
-      const dbOwner = await pool.query(
-        `SELECT ranking_eligible FROM practice_sessions WHERE session_id = $1`,
-        [ownerSessionId],
-      );
-      expect(dbOwner.rows[0].ranking_eligible).toBe(true);
-
-      // Impostor: 같은 닉네임
-      const resImpostor = await agentImpostor
+      const resB = await agentB
         .post("/api/practice/sessions")
         .set("Content-Type", "application/json")
         .send({ mode: "practice", nickname });
-      expect(resImpostor.status).toBe(201);
+      expect(resB.status).toBe(201);
 
-      // Impostor의 세션은 ranking_eligible = false
-      const impostorSessionId = resImpostor.body.data.sessionId;
-      const dbImpostor = await pool.query(
-        `SELECT ranking_eligible FROM practice_sessions WHERE session_id = $1`,
-        [impostorSessionId],
+      const db = await pool.query(
+        `SELECT ranking_eligible FROM practice_sessions WHERE session_id = ANY($1)`,
+        [[resA.body.data.sessionId, resB.body.data.sessionId]],
       );
-      expect(dbImpostor.rows[0].ranking_eligible).toBe(false);
+      expect(db.rows).toHaveLength(2);
+      expect(db.rows.every((r) => r.ranking_eligible === true)).toBe(true);
     });
   });
 
   describe("[4] ranked 필드 처리", () => {
-    it("impostor 세션 완료 시 응답에 ranked=false, rank 필드는 모두 null", async () => {
-      const nickname = uniqueNickname();
-      const agentOwner = request.agent(app);
-      const agentImpostor = request.agent(app);
+    it("ranking_eligible=false 세션 완료 시 응답에 ranked=false, rank 필드는 모두 null", async () => {
+      // ranking_eligible 은 이제 운영자가 개별 기록을 랭킹에서 뺄 때 쓰는 수동 플래그다.
+      const agent = request.agent(app);
 
-      await agentOwner
+      const startRes = await agent
         .post("/api/practice/sessions")
         .set("Content-Type", "application/json")
-        .send({ mode: "practice", nickname });
-
-      const startRes = await agentImpostor
-        .post("/api/practice/sessions")
-        .set("Content-Type", "application/json")
-        .send({ mode: "practice", nickname });
+        .send({ mode: "practice", nickname: uniqueNickname() });
       const sessionId = startRes.body.data.sessionId;
 
-      const completeRes = await agentImpostor
+      await pool.query(
+        `UPDATE practice_sessions SET ranking_eligible = false WHERE session_id = $1`,
+        [sessionId],
+      );
+
+      const completeRes = await agent
         .post(`/api/practice/sessions/${sessionId}/complete`)
         .set("Content-Type", "application/json")
         .send({});
@@ -123,7 +121,7 @@ describe("Practice API", () => {
       expect(typeof completeRes.body.data.elapsedMs).toBe("number");
     });
 
-    it("정식 소유자가 세션 완료 시 응답에 ranked=true, rank 필드는 숫자", async () => {
+    it("일반 세션 완료 시 응답에 ranked=true, rank 필드는 숫자", async () => {
       const nickname = uniqueNickname();
       const agent = request.agent(app);
 

@@ -198,6 +198,53 @@ const getRoundById = async (roundId: number): Promise<RoundSummary | null> => {
   return result.rows[0] ? mapRound(result.rows[0]) : null;
 };
 
+export type MyParticipation = {
+  sessionId: string;
+  status: "queued" | "active" | "completed";
+  queuePosition: number | null;
+  seatLabel: string | null;
+  elapsedMs: number | null;
+};
+
+/**
+ * 요청자가 이 회차에 이미 참여했는지 조회한다.
+ *
+ * 대상 상태는 세션 생성(createSession) 이 중복 판정에 쓰는 집합과 같은
+ * queued/active/completed 다. `uq_live_sessions_round_user_active` /
+ * `uq_live_sessions_round_guest_active` 부분 유니크 인덱스가 이 세 상태에서
+ * (round, 참가자) 조합을 하나로 강제하므로 결과는 최대 1행이다.
+ *
+ * 회원은 user_id, 게스트는 guest_uuid 쿠키로 식별한다. 둘 다 없으면 조회 없이 null.
+ */
+const getMyParticipation = async (
+  roundId: number,
+  identity: { userId?: number | null; guestUuid?: string | null },
+): Promise<MyParticipation | null> => {
+  const { userId, guestUuid } = identity;
+  if (userId == null && !guestUuid) return null;
+
+  const column = userId != null ? "user_id" : "guest_uuid";
+  const value = userId != null ? userId : guestUuid;
+
+  const result = await pool.query(
+    `SELECT session_id, status, queue_position, seat_label, elapsed_ms
+     FROM live_sessions
+     WHERE round_id = $1 AND ${column} = $2
+       AND status IN ('queued', 'active', 'completed')`,
+    [roundId, value],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+
+  return {
+    sessionId: row.session_id as string,
+    status: row.status as MyParticipation["status"],
+    queuePosition: (row.queue_position ?? null) as number | null,
+    seatLabel: (row.seat_label ?? null) as string | null,
+    elapsedMs: (row.elapsed_ms ?? null) as number | null,
+  };
+};
+
 // ─── 관리자 통계 ─────────────────────────────────────────────────────────────
 
 export interface RoundStatsRow {
@@ -265,5 +312,6 @@ export {
   getNext,
   getLastRoundTopN,
   getRoundById,
+  getMyParticipation,
   getRoundStats,
 };
