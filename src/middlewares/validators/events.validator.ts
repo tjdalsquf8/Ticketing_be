@@ -1,4 +1,5 @@
 import { body, param, query } from "express-validator";
+import { sessionIdQueryValidator } from "./live_participate.validator";
 
 // ─── 공통 ─────────────────────────────────────────────────────────────────────
 
@@ -268,6 +269,20 @@ const cancelSeriesBodyValidator = [
     .withMessage("from은 ISO8601 형식이어야 합니다."),
 ];
 
+// ─── GET /api/events/:eventId/seats/stream 쿼리 ─────────────────────────────
+
+const eventSeatsStreamQueryValidator = [
+  ...eventIdParamValidator,
+  ...sessionIdQueryValidator,
+];
+
+// ─── GET /api/events/:eventId/queue/stream 쿼리 ─────────────────────────────
+
+const eventQueueStreamQueryValidator = [
+  ...eventIdParamValidator,
+  ...sessionIdQueryValidator,
+];
+
 // ─── GET /api/admin/events/:eventId/registrations 쿼리 ──────────────────────
 
 const adminListRegistrationsQueryValidator = [
@@ -299,4 +314,6 @@ export {
   cancelEventBodyValidator,
   cancelSeriesBodyValidator,
   adminListRegistrationsQueryValidator,
+  eventSeatsStreamQueryValidator,
+  eventQueueStreamQueryValidator,
 };

@@ -7,7 +7,14 @@ const intervalMap = {
   monthly: "30 days",
 } as const;
 
-type Period = keyof typeof intervalMap;
+type Period = keyof typeof intervalMap | "all";
+
+const isValidPeriod = (period: string | undefined): period is Period =>
+  period === "all" || period !== undefined && period in intervalMap;
+
+// period="all"이면 기간 제한 없이 전체 기록을 본다 — 조건절 자체를 비운다.
+const periodClause = (alias: string, period: Period): string =>
+  period === "all" ? "" : `AND ${alias}started_at >= NOW() - INTERVAL '${intervalMap[period]}'`;
 
 /**
  * 리더보드 표시명 = 그 사람의 **최고기록을 낸 세션 row 의 nickname 스냅샷**.
@@ -37,14 +44,13 @@ const getRankings = async (params: {
 }) => {
   const { mode, page, size, period, eventId } = params;
 
-  if (!period || !(period in intervalMap)) {
+  if (!isValidPeriod(period)) {
     throw new AppError(
       400,
       "INVALID_PERIOD",
-      "period는 daily, weekly, monthly 중 하나여야 합니다.",
+      "period는 daily, weekly, monthly, all 중 하나여야 합니다.",
     );
   }
-  const interval = intervalMap[period as Period];
   const clampedSize = Math.min(size, 100);
   const clampedPage = Math.min(page, Math.ceil(100 / clampedSize));
   const offset = (clampedPage - 1) * clampedSize;
@@ -69,7 +75,7 @@ const getRankings = async (params: {
          (user_id IS NOT NULL) AS is_verified
        FROM live_sessions
        WHERE status = 'completed'
-         AND started_at >= NOW() - INTERVAL '${interval}'
+         ${periodClause("", period)}
          ${eventFilter}
        GROUP BY COALESCE(user_id::text, guest_uuid), user_id
        ORDER BY best_ms
@@ -90,7 +96,7 @@ const getRankings = async (params: {
       `SELECT COUNT(DISTINCT COALESCE(user_id::text, guest_uuid)) AS total
        FROM live_sessions
        WHERE status = 'completed'
-         AND started_at >= NOW() - INTERVAL '${interval}'
+         ${periodClause("", period)}
          ${countEventFilter}`,
       countParams,
     );
@@ -120,7 +126,7 @@ const getRankings = async (params: {
      FROM practice_sessions
      WHERE completed_at IS NOT NULL
        AND mode = $1
-       AND started_at >= NOW() - INTERVAL '${interval}'
+       ${periodClause("", period)}
        AND ranking_eligible = true
        ${eventFilter}
      GROUP BY COALESCE(user_id::text, guest_uuid), user_id
@@ -143,7 +149,7 @@ const getRankings = async (params: {
      FROM practice_sessions
      WHERE completed_at IS NOT NULL
        AND mode = $1
-       AND started_at >= NOW() - INTERVAL '${interval}'
+       ${periodClause("", period)}
        AND ranking_eligible = true
        ${countEventFilter}`,
     countParams,
@@ -188,15 +194,13 @@ const getMyRankings = async (params: {
 }) => {
   const { identity, mode, period, page, size, eventId } = params;
 
-  if (!period || !(period in intervalMap)) {
+  if (!isValidPeriod(period)) {
     throw new AppError(
       400,
       "INVALID_PERIOD",
-      "period는 daily, weekly, monthly 중 하나여야 합니다.",
+      "period는 daily, weekly, monthly, all 중 하나여야 합니다.",
     );
   }
-  // intervalMap 의 값만 보간되므로 사용자 입력이 SQL 에 직접 들어가지 않는다.
-  const interval = intervalMap[period as Period];
 
   // 리더보드가 아니라 개인 이력이므로 getRankings 의 "총 100행" 상한은 적용하지 않는다.
   const clampedSize = Math.min(Math.max(size, 1), 100);
@@ -212,7 +216,7 @@ const getMyRankings = async (params: {
       ? `${alias}status = 'completed'`
       : `${alias}completed_at IS NOT NULL AND ${alias}mode = 'practice' AND ${alias}ranking_eligible = true`;
   const periodFilter = (alias: string) =>
-    `${alias}started_at >= NOW() - INTERVAL '${interval}'`;
+    period === "all" ? "TRUE" : `${alias}started_at >= NOW() - INTERVAL '${intervalMap[period]}'`;
 
   const values: (string | number)[] = [identity];
   let eventFilter = (_alias: string) => "";
@@ -291,14 +295,13 @@ const getMyBestRanking = async (params: {
 }): Promise<MyBestRanking | null> => {
   const { identity, mode, period, eventId } = params;
 
-  if (!period || !(period in intervalMap)) {
+  if (!isValidPeriod(period)) {
     throw new AppError(
       400,
       "INVALID_PERIOD",
-      "period는 daily, weekly, monthly 중 하나여야 합니다.",
+      "period는 daily, weekly, monthly, all 중 하나여야 합니다.",
     );
   }
-  const interval = intervalMap[period as Period];
 
   const isLive = mode === "live";
   const table = isLive ? "public.live_sessions" : "public.practice_sessions";
@@ -307,7 +310,7 @@ const getMyBestRanking = async (params: {
       ? `${alias}status = 'completed'`
       : `${alias}completed_at IS NOT NULL AND ${alias}mode = 'practice' AND ${alias}ranking_eligible = true`;
   const periodFilter = (alias: string) =>
-    `${alias}started_at >= NOW() - INTERVAL '${interval}'`;
+    period === "all" ? "TRUE" : `${alias}started_at >= NOW() - INTERVAL '${intervalMap[period]}'`;
 
   const values: (string | number)[] = [identity];
   let eventFilter = (_alias: string) => "";

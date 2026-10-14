@@ -6,7 +6,7 @@ const getRankingsValidator = [
     .isIn(["practice", "live"]).withMessage("mode는 practice, live 중 하나여야 합니다."),
   query("period")
     .notEmpty().withMessage("period는 필수입니다.")
-    .isIn(["daily", "weekly", "monthly"]).withMessage("period는 daily, weekly, monthly 중 하나여야 합니다."),
+    .isIn(["daily", "weekly", "monthly", "all"]).withMessage("period는 daily, weekly, monthly, all 중 하나여야 합니다."),
   query("page")
     .optional()
     .isInt({ min: 1 }).withMessage("page는 1 이상의 정수여야 합니다."),
@@ -23,7 +23,7 @@ const getMyRankingsValidator = [
     .isIn(["practice", "live"]).withMessage("mode는 practice, live 중 하나여야 합니다."),
   query("period")
     .notEmpty().withMessage("period는 필수입니다.")
-    .isIn(["daily", "weekly", "monthly"]).withMessage("period는 daily, weekly, monthly 중 하나여야 합니다."),
+    .isIn(["daily", "weekly", "monthly", "all"]).withMessage("period는 daily, weekly, monthly, all 중 하나여야 합니다."),
   query("page")
     .optional()
     .isInt({ min: 1 }).withMessage("page는 1 이상의 정수여야 합니다."),
@@ -40,7 +40,7 @@ const getMyBestRankingValidator = [
     .isIn(["practice", "live"]).withMessage("mode는 practice, live 중 하나여야 합니다."),
   query("period")
     .notEmpty().withMessage("period는 필수입니다.")
-    .isIn(["daily", "weekly", "monthly"]).withMessage("period는 daily, weekly, monthly 중 하나여야 합니다."),
+    .isIn(["daily", "weekly", "monthly", "all"]).withMessage("period는 daily, weekly, monthly, all 중 하나여야 합니다."),
   query("eventId").optional().isInt({ min: 1 }).withMessage("eventId는 1 이상의 정수여야 합니다."),
 ];
 

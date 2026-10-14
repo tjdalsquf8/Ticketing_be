@@ -11,6 +11,8 @@ import {
   holdBodyValidator,
   confirmBodyValidator,
   getLastRoundQueryValidator,
+  seatsStreamQueryValidator,
+  queueStreamQueryValidator,
 } from "../middlewares/validators/live_participate.validator";
 
 const router = Router();
@@ -41,15 +43,15 @@ router.post(
 );
 
 router.get(
-  "/sessions/:sessionId/queue",
-  sessionIdParamValidator,
-  participateController.getQueue,
+  "/rounds/:roundId/queue/stream",
+  queueStreamQueryValidator,
+  participateController.getQueueStream,
 );
 
 router.get(
-  "/sessions/:sessionId/seats",
-  sessionIdParamValidator,
-  participateController.getSeats,
+  "/rounds/:roundId/seats/stream",
+  seatsStreamQueryValidator,
+  participateController.getSeatsStream,
 );
 
 router.post(
@@ -64,6 +66,12 @@ router.post(
   sessionIdParamValidator,
   confirmBodyValidator,
   participateController.postConfirm,
+);
+
+router.delete(
+  "/sessions/:sessionId",
+  sessionIdParamValidator,
+  participateController.deleteSession,
 );
 
 export default router;

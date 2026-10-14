@@ -64,6 +64,28 @@ const confirmBodyValidator = [
     .withMessage("seatLabel은 '{zoneId}-{rowLabel}-{seatNumber}' 3-segment 형식이어야 합니다 (예: FC-1-1, GA-스탠딩L-3-1)."),
 ];
 
+/** sessionId 쿼리 파라미터 — SSE 스트림처럼 sessionId 를 path 가 아닌 query 로 받는 라우트용 */
+const sessionIdQueryValidator = [
+  query("sessionId")
+    .trim()
+    .notEmpty()
+    .withMessage("sessionId는 필수입니다.")
+    .matches(/^[0-9a-f]{20}$/)
+    .withMessage("sessionId 형식이 올바르지 않습니다."),
+];
+
+/** GET /rounds/:roundId/seats/stream?sessionId=... */
+const seatsStreamQueryValidator = [
+  ...roundIdParamValidator,
+  ...sessionIdQueryValidator,
+];
+
+/** GET /rounds/:roundId/queue/stream?sessionId=... */
+const queueStreamQueryValidator = [
+  ...roundIdParamValidator,
+  ...sessionIdQueryValidator,
+];
+
 /** GET /last-round?limit=N — 선택적 limit 파라미터 (1~30 정수) */
 const getLastRoundQueryValidator = [
   query("limit")
@@ -94,8 +116,11 @@ export {
   roundIdParamValidator,
   getRoundRankingsQueryValidator,
   sessionIdParamValidator,
+  sessionIdQueryValidator,
   createSessionBodyValidator,
   holdBodyValidator,
   confirmBodyValidator,
   getLastRoundQueryValidator,
+  seatsStreamQueryValidator,
+  queueStreamQueryValidator,
 };

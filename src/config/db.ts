@@ -7,6 +7,8 @@ const pool = new Pool({
   database: config.db.name,
   user: config.db.user,
   password: config.db.password,
+  max: config.db.poolMax,
+  connectionTimeoutMillis: config.db.poolConnectionTimeoutMillis,
 });
 
 export default pool;

@@ -14,6 +14,8 @@ import {
   calendarQueryValidator,
   listMyRegistrationsQueryValidator,
   latestRankingsQueryValidator,
+  eventSeatsStreamQueryValidator,
+  eventQueueStreamQueryValidator,
 } from "../middlewares/validators/events.validator";
 import {
   sessionIdParamValidator,
@@ -103,25 +105,27 @@ router.post(
   eventsController.startEventSession,
 );
 
-// GET /api/events/sessions/:sessionId/queue
-// GET /api/events/sessions/:sessionId/seats
 // POST /api/events/sessions/:sessionId/hold
 // POST /api/events/sessions/:sessionId/confirm
 // → 기존 live_participate.controller 재사용 (세션 ID 기반, round_id와 event_id 무관)
+
+// GET /api/events/:eventId/queue/stream?sessionId=... — 대기열 순번 SSE 스트림.
 router.get(
-  "/sessions/:sessionId/queue",
+  "/:eventId/queue/stream",
   authMiddleware,
   eventSessionLimiter,
-  sessionIdParamValidator,
-  participateController.getQueue,
+  eventQueueStreamQueryValidator,
+  participateController.getEventQueueStream,
 );
 
+// GET /api/events/:eventId/seats/stream?sessionId=... — 좌석맵 SSE 스트림.
+// eventId 로 스코프해 다른 이벤트 좌석 변경이 섞이지 않게 한다.
 router.get(
-  "/sessions/:sessionId/seats",
+  "/:eventId/seats/stream",
   authMiddleware,
   eventSessionLimiter,
-  sessionIdParamValidator,
-  participateController.getSeats,
+  eventSeatsStreamQueryValidator,
+  participateController.getEventSeatsStream,
 );
 
 router.post(
