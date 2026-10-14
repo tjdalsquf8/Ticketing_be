@@ -5,11 +5,14 @@ import { liveLimiter } from "../middlewares/rateLimiter";
 import optionalAuthMiddleware from "../middlewares/optionalAuthMiddleware";
 import {
   roundIdParamValidator,
+  getRoundRankingsQueryValidator,
   sessionIdParamValidator,
   createSessionBodyValidator,
   holdBodyValidator,
   confirmBodyValidator,
   getLastRoundQueryValidator,
+  seatsStreamQueryValidator,
+  queueStreamQueryValidator,
 } from "../middlewares/validators/live_participate.validator";
 
 const router = Router();
@@ -25,6 +28,11 @@ router.get("/current", liveController.getCurrent);
 router.get("/next", liveController.getNext);
 router.get("/last-round", getLastRoundQueryValidator, liveController.getLastRound);
 router.get("/rounds/:roundId", roundIdParamValidator, liveController.getRoundById);
+router.get(
+  "/rounds/:roundId/rankings",
+  getRoundRankingsQueryValidator,
+  liveController.getRoundRankings,
+);
 
 // ─── 참여 API 라우트 ──────────────────────────────────────────────────────────
 router.post(
@@ -35,15 +43,15 @@ router.post(
 );
 
 router.get(
-  "/sessions/:sessionId/queue",
-  sessionIdParamValidator,
-  participateController.getQueue,
+  "/rounds/:roundId/queue/stream",
+  queueStreamQueryValidator,
+  participateController.getQueueStream,
 );
 
 router.get(
-  "/sessions/:sessionId/seats",
-  sessionIdParamValidator,
-  participateController.getSeats,
+  "/rounds/:roundId/seats/stream",
+  seatsStreamQueryValidator,
+  participateController.getSeatsStream,
 );
 
 router.post(
@@ -58,6 +66,12 @@ router.post(
   sessionIdParamValidator,
   confirmBodyValidator,
   participateController.postConfirm,
+);
+
+router.delete(
+  "/sessions/:sessionId",
+  sessionIdParamValidator,
+  participateController.deleteSession,
 );
 
 export default router;

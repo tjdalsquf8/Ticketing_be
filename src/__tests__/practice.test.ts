@@ -288,3 +288,7 @@ describe("Practice API", () => {
     });
   });
 });
+
+afterAll(async () => {
+  await pool.end();
+});

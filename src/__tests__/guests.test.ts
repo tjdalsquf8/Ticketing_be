@@ -1,5 +1,6 @@
 import request from "supertest";
 import app from "../app";
+import pool from "../config/db";
 import { cleanupTestPracticeSessions, cleanupTestGuests, uniqueNickname } from "./setup";
 
 describe("Guests API", () => {
@@ -187,4 +188,8 @@ describe("Guests API", () => {
       expect(meRes.body.data.guestUuid).toMatch(/^[0-9a-f-]{36}$/);
     });
   });
+});
+
+afterAll(async () => {
+  await pool.end();
 });

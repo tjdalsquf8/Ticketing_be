@@ -6,6 +6,11 @@ import {
   ensureUpcomingRounds,
   transitionRounds,
 } from "../services/live.service";
+import { emitSeatUpdate, type SeatContextType } from "../events/seatEvents";
+import { emitQueueChanged } from "../events/queueEvents";
+import * as liveQueue from "../services/live_queue.redis";
+import * as liveSession from "../services/live_session.redis";
+import * as liveActive from "../services/live_active.redis";
 
 const TIMEZONE = "Asia/Seoul";
 const ENSURE_SCHEDULE = "0 0 * * *"; // 매일 KST 00시 (그날 24시간 회차 pre-create)
@@ -46,44 +51,47 @@ const runTransition = async () => {
  *
  * 각 open 회차별로 active 정원(ACTIVE_CAPACITY)에 여유가 생기면
  * queued 세션 중 queue_position ASC 순서로 빈 자리만큼 active 로 승격한다.
- * 한 번에 최대 20개까지 처리한다.
+ * 정원이 이미 activeCapacity(env, 1~1000)로 상한이 걸려있어 별도 배치 상한을
+ * 두지 않는다 — 정원까지는 한 tick에 다 채운다.
  *
  * setInterval 200ms 로 등록되어 대기열이 거의 실시간으로 소진된다.
+ *
+ * started_at 은 승격 시 건드리지 않는다. 소요 시간(elapsed_ms) 정의가
+ * "대기실 입장(세션 생성) 부터 좌석 확정까지" 라서 대기열에서 기다린 시간도
+ * 기록에 포함되어야 하기 때문이다. 예전에는 여기서 started_at = NOW() 로
+ * 재설정해 대기 시간을 기록에서 빼고 있었다.
  */
 const promoteQueuedSessions = async (): Promise<void> => {
-  // open 회차별 active 수와 queued 수를 한 번에 조회
+  // 열린 회차 목록만 Postgres에서 가져온다 (round 메타데이터는 계속 Postgres).
+  // 대기열/활성 상태는 "DB엔 최종 결과만" 원칙에 따라 전부 Redis에 있다.
   const roundsRes = await pool.query(
-    `SELECT id AS round_id,
-            (SELECT COUNT(*) FROM live_sessions ls WHERE ls.round_id = lr.id AND ls.status = 'active') AS active_count,
-            (SELECT COUNT(*) FROM live_sessions ls WHERE ls.round_id = lr.id AND ls.status = 'queued') AS queued_count
-     FROM live_rounds lr
-     WHERE lr.status = 'open'`,
+    `SELECT id AS round_id FROM live_rounds WHERE status = 'open'`,
   );
 
   for (const row of roundsRes.rows) {
     const roundId: number = row.round_id;
-    const activeCount = parseInt(row.active_count, 10);
-    const queuedCount = parseInt(row.queued_count, 10);
 
-    if (queuedCount === 0) continue;
-
-    const slots = Math.min(config.live.activeCapacity - activeCount, queuedCount, 20);
+    const activeCount = await liveActive.activeCount(roundId);
+    let slots = config.live.activeCapacity - activeCount;
     if (slots <= 0) continue;
+    // 스윕 테스트용 상한. 0(기본)이면 무제한 — activeCapacity 여유만큼 한 tick에 다 채운다.
+    if (config.live.promoteBatchCap > 0) {
+      slots = Math.min(slots, config.live.promoteBatchCap);
+    }
 
-    // queue_position ASC 순으로 slots 개만큼 active 승격
-    await pool.query(
-      `UPDATE live_sessions
-       SET status = 'active',
-           queue_position = NULL,
-           started_at = NOW()
-       WHERE id IN (
-         SELECT id FROM live_sessions
-         WHERE round_id = $1 AND status = 'queued'
-         ORDER BY queue_position ASC
-         LIMIT $2
-       )`,
-      [roundId, slots],
-    );
+    // Redis ZSET에서 맨 앞 slots명의 sessionId를 먼저 뽑는다 (정렬은 Redis가 이미 해둔 상태).
+    const frontSessionIds = await liveQueue.peekFront("round", roundId, slots);
+    if (frontSessionIds.length === 0) continue;
+
+    // 활성 집합에 추가 + 각 세션 레코드 status를 active로 변경 + 큐에서 제거.
+    // Postgres는 전혀 건드리지 않는다 — 승격은 confirm 전까지 "최종 결과"가 아니다.
+    await liveActive.addActive(roundId, frontSessionIds);
+    await Promise.all(frontSessionIds.map((id) => liveSession.updateStatus(id, "active")));
+    await liveQueue.dequeue("round", roundId, frontSessionIds);
+
+    // 승격된 사람들은 물론, 남은 대기자들도 live_position 이 한 칸씩 당겨지므로
+    // 대기열 스트림 구독자 전원에게 재계산을 알린다.
+    emitQueueChanged({ contextType: "round", contextId: roundId });
   }
 };
 
@@ -101,15 +109,19 @@ const sweepExpiredHolds = async (): Promise<void> => {
   try {
     await client.query("BEGIN");
 
-    // 만료된 hold 의 seat_id 를 먼저 수집하고 삭제
+    // 만료된 hold 를 삭제하며 좌석 label·컨텍스트를 함께 수집 (SSE emit 용)
     const expiredRes = await client.query(
-      `DELETE FROM live_holds
-       WHERE expires_at < NOW()
-       RETURNING seat_id`,
+      `DELETE FROM live_holds lh
+       USING live_seats ls
+       WHERE lh.seat_id = ls.id
+         AND lh.expires_at < NOW()
+       RETURNING ls.id AS seat_id, ls.seat_label, ls.round_id, ls.event_id`,
     );
 
     if (expiredRes.rows.length > 0) {
-      const seatIds = expiredRes.rows.map((r: { seat_id: number }) => r.seat_id);
+      const seatIds = expiredRes.rows.map(
+        (r: { seat_id: number }) => r.seat_id,
+      );
       await client.query(
         `UPDATE live_seats SET status = 'available'
          WHERE id = ANY($1::int[]) AND status = 'held'`,
@@ -118,11 +130,84 @@ const sweepExpiredHolds = async (): Promise<void> => {
     }
 
     await client.query("COMMIT");
+
+    for (const row of expiredRes.rows) {
+      emitSeatUpdate({
+        seatLabel: row.seat_label,
+        status: "available",
+        contextType: row.round_id != null ? "round" : "event",
+        contextId: row.round_id ?? row.event_id,
+      });
+    }
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("[live/sweep-holds] failed:", err);
   } finally {
     client.release();
+  }
+};
+
+// ─── 방치된 세션 정리 크론 (5000ms interval) ─────────────────────────────────
+
+/**
+ * sweepStaleSessions
+ *
+ * 탭 강제 종료·네트워크 끊김 등으로 취소(abandon) 호출 없이 방치된 queued/active
+ * 세션을 정리한다. hold 요청·대기열/좌석 SSE 스트림 연결(연결 중 touchSessionHeartbeat
+ * 주기 호출)마다 last_seen_at 이 갱신되므로, 이 값이 sessionHeartbeatTtlSeconds 이상
+ * 오래된 queued/active 세션은 더 이상 화면을 보고 있지 않은 것으로 간주해 failed 처리한다.
+ *
+ * active 세션이 정리되면 active_count 집계에서 빠지므로 promoteQueuedSessions
+ * 크론이 다음 대기자를 승격한다. queued 세션이 정리되면 뒷사람 순번도 자연히 당겨진다.
+ */
+const sweepStaleSessions = async (): Promise<void> => {
+  // 이벤트 세션(아직 이관 범위 밖, 계속 Postgres) — round 세션은 이제 Postgres에
+  // queued/active로 존재하지 않으므로 이 쿼리는 자연히 event만 건드린다.
+  const staleRes = await pool.query(
+    `UPDATE live_sessions
+     SET status = 'failed', queue_position = NULL
+     WHERE status IN ('active', 'queued')
+       AND last_seen_at < NOW() - ($1 * INTERVAL '1 second')
+     RETURNING round_id, event_id`,
+    [config.live.sessionHeartbeatTtlSeconds],
+  );
+
+  const notified = new Set<string>();
+  for (const row of staleRes.rows) {
+    const contextType: SeatContextType =
+      row.round_id != null ? "round" : "event";
+    const contextId: number = row.round_id ?? row.event_id;
+    const key = `${contextType}:${contextId}`;
+    if (notified.has(key)) continue;
+    notified.add(key);
+    emitQueueChanged({ contextType, contextId });
+  }
+
+  // 라이브(round) 세션 — Redis heartbeat ZSET 기준으로 방치 세션 찾아 정리.
+  // "DB엔 최종 결과만" 원칙이라 완료 못 한 세션은 Postgres에 흔적 없이 그냥 지운다.
+  const cutoffMs = Date.now() - config.live.sessionHeartbeatTtlSeconds * 1000;
+  const staleSessionIds = await liveSession.findStaleSessionIds(cutoffMs);
+  const notifiedRounds = new Set<number>();
+
+  for (const sessionId of staleSessionIds) {
+    const record = await liveSession.getSessionRecord(sessionId);
+    if (record == null) {
+      // 레코드는 이미 없는데 heartbeat 색인에만 남은 고아 항목 — 색인만 정리
+      await liveSession.removeFromHeartbeat(sessionId);
+      continue;
+    }
+
+    if (record.status === "queued") {
+      await liveQueue.dequeue("round", record.roundId, [sessionId]);
+    } else {
+      await liveActive.leaveActive(record.roundId, sessionId);
+    }
+    await liveSession.deleteSessionRecord(sessionId, record.roundId, record.userId, record.guestUuid);
+
+    if (!notifiedRounds.has(record.roundId)) {
+      notifiedRounds.add(record.roundId);
+      emitQueueChanged({ contextType: "round", contextId: record.roundId });
+    }
   }
 };
 
@@ -138,13 +223,12 @@ const sweepExpiredHolds = async (): Promise<void> => {
  * transitionRounds() 와 같은 타이밍 크론(TRANSITION_SCHEDULE)에 이어 실행한다.
  */
 const finalizeClosedRounds = async (): Promise<void> => {
-  // closed 이면서 아직 active/queued 세션이 남아 있는 회차만 대상으로
+  // 라이브 세션은 이제 Postgres에 queued/active로 안 남으니, "아직 세션이 남은
+  // 회차"를 Postgres join으로 찾을 수 없다. 대신 "최근에 닫힌 회차"를 후보로 보고
+  // Redis 쪽에 잔여 큐/활성 세션이 있는지 직접 확인한다.
   const roundsRes = await pool.query(
-    `SELECT DISTINCT lr.id AS round_id
-     FROM live_rounds lr
-     JOIN live_sessions ls ON ls.round_id = lr.id
-     WHERE lr.status = 'closed'
-       AND ls.status IN ('active', 'queued')`,
+    `SELECT id AS round_id FROM live_rounds
+     WHERE status = 'closed' AND closes_at > NOW() - INTERVAL '1 hour'`,
   );
 
   for (const row of roundsRes.rows) {
@@ -153,9 +237,13 @@ const finalizeClosedRounds = async (): Promise<void> => {
     try {
       await client.query("BEGIN");
 
-      // 잔여 hold 삭제 + 좌석 복구
+      // 잔여 hold 삭제 + 좌석 복구 (seat_label 도 함께 수집 — SSE emit 용)
       const holdRes = await client.query(
-        `DELETE FROM live_holds WHERE round_id = $1 RETURNING seat_id`,
+        `DELETE FROM live_holds lh
+         USING live_seats ls
+         WHERE lh.round_id = $1
+           AND lh.seat_id = ls.id
+         RETURNING ls.id AS seat_id, ls.seat_label`,
         [roundId],
       );
       if (holdRes.rows.length > 0) {
@@ -167,19 +255,41 @@ const finalizeClosedRounds = async (): Promise<void> => {
         );
       }
 
-      // active/queued → failed
-      await client.query(
-        `UPDATE live_sessions SET status = 'failed'
-         WHERE round_id = $1 AND status IN ('active', 'queued')`,
-        [roundId],
-      );
-
       await client.query("COMMIT");
+
+      for (const row of holdRes.rows) {
+        emitSeatUpdate({
+          seatLabel: row.seat_label,
+          status: "available",
+          contextType: "round",
+          contextId: roundId,
+        });
+      }
     } catch (err) {
       await client.query("ROLLBACK");
       console.error(`[live/finalize] round ${roundId} failed:`, err);
+      continue;
     } finally {
       client.release();
+    }
+
+    // Redis 잔여 큐/활성 세션 정리 — 완료 못 한 세션은 "DB엔 최종 결과만" 원칙상
+    // 흔적 없이 그냥 지운다.
+    const queuedIds = await liveQueue.allMembers("round", roundId);
+    const activeIds = await liveActive.members(roundId);
+    for (const sessionId of [...queuedIds, ...activeIds]) {
+      const record = await liveSession.getSessionRecord(sessionId);
+      if (record != null) {
+        await liveSession.deleteSessionRecord(sessionId, roundId, record.userId, record.guestUuid);
+      } else {
+        await liveSession.removeFromHeartbeat(sessionId);
+      }
+    }
+    await liveQueue.clearRound("round", roundId);
+    await liveActive.clearRound(roundId);
+
+    if (queuedIds.length > 0 || activeIds.length > 0) {
+      emitQueueChanged({ contextType: "round", contextId: roundId });
     }
   }
 };
@@ -197,6 +307,14 @@ const runSweep = async () => {
     await sweepExpiredHolds();
   } catch (err) {
     console.error("[live/sweep] failed:", err);
+  }
+};
+
+const runSweepStaleSessions = async () => {
+  try {
+    await sweepStaleSessions();
+  } catch (err) {
+    console.error("[live/sweep-sessions] failed:", err);
   }
 };
 
@@ -255,6 +373,7 @@ const scheduleRoundClose = (roundId: number, closesAt: Date): void => {
 export {
   promoteQueuedSessions,
   sweepExpiredHolds,
+  sweepStaleSessions,
   finalizeClosedRounds,
   scheduleRoundClose,
 };
@@ -277,6 +396,9 @@ export const startLiveScheduler = () => {
   // setInterval 기반 고빈도 작업 등록
   setInterval(() => void runPromote(), 200);
   setInterval(() => void runSweep(), 5000);
+  setInterval(() => void runSweepStaleSessions(), 5000);
 
-  console.log("[live] interval jobs registered (promote=200ms, sweep=5000ms)");
+  console.log(
+    "[live] interval jobs registered (promote=200ms, sweep=5000ms, sweep-sessions=5000ms)",
+  );
 };

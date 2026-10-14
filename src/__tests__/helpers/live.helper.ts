@@ -9,6 +9,11 @@
 import crypto from "crypto";
 import pool from "../../config/db";
 import bcrypt from "bcrypt";
+import { redis } from "../../config/redis";
+import * as liveSession from "../../services/live_session.redis";
+import * as liveQueue from "../../services/live_queue.redis";
+import * as liveActive from "../../services/live_active.redis";
+import * as liveSeatLock from "../../services/live_seat_lock.redis";
 
 // ─── 상수 ────────────────────────────────────────────────────────────────────
 
@@ -211,11 +216,85 @@ export async function expireHold(actorKey: string, roundId: number): Promise<voi
   );
 }
 
+// ─── Redis 기반 라이브 세션/좌석락 헬퍼 ─────────────────────────────────────
+//
+// createSession 이후 round 세션은 Postgres가 아닌 Redis에 queued/active로
+// 존재한다. 기존 insertTestSession(Postgres 직접 INSERT)은 세션 "존재"는
+// 흉내낼 수 있지만(Postgres 폴백 경로로 조회됨), 대기열 순번·활성 정원·좌석
+// hold 같은 실제 "진행 중" 상태는 Redis에만 있으므로 이 헬퍼들로 채운다.
+
+export interface InsertRedisSessionOptions {
+  roundId: number;
+  userId?: number | null;
+  guestUuid?: string | null;
+  nickname?: string;
+  status?: "queued" | "active";
+}
+
+/** Redis에 라이브 세션 레코드를 직접 만든다 (대기열/활성 집합에도 등록). */
+export async function insertRedisLiveSession(
+  opts: InsertRedisSessionOptions,
+): Promise<{ sessionId: string }> {
+  const { roundId, userId = null, guestUuid = null, nickname = "__tlv_guest", status = "active" } = opts;
+  const sessionId = crypto.randomBytes(10).toString("hex");
+
+  await liveSession.createSessionRecord({ sessionId, roundId, userId, guestUuid, nickname, status });
+  if (status === "active") {
+    await liveActive.addActive(roundId, [sessionId]);
+  } else {
+    await liveQueue.enqueue("round", roundId, sessionId);
+  }
+
+  return { sessionId };
+}
+
+/** Redis 좌석 hold를 직접 건다 (실제 holdSeat과 같은 Lua 스크립트 재사용). */
+export async function insertRedisSeatHold(
+  roundId: number,
+  seatLabel: string,
+  actorKey: string,
+  ttlMs = 30000,
+): Promise<void> {
+  await liveSeatLock.tryHold(roundId, seatLabel, actorKey, ttlMs);
+}
+
+/** actorKey 형식 테스트 헬퍼 (서비스의 buildActorKey와 동일 규칙). */
+export function testActorKey(opts: { userId?: number | null; guestUuid?: string | null }): string {
+  return opts.userId != null ? `user:${opts.userId}` : `guest:${opts.guestUuid}`;
+}
+
 // ─── 테스트 데이터 전체 정리 ─────────────────────────────────────────────────
 
-/** roundId 목록에 해당하는 모든 데이터 삭제 */
+/** roundId 목록에 해당하는 모든 데이터 삭제 (Postgres + Redis) */
 export async function cleanupTestRounds(roundIds: number[]): Promise<void> {
   if (roundIds.length === 0) return;
+
+  for (const roundId of roundIds) {
+    // Redis: 큐/활성 집합에 남은 세션 레코드 정리
+    const queuedIds = await liveQueue.allMembers("round", roundId);
+    const activeIds = await liveActive.members(roundId);
+    for (const sessionId of [...queuedIds, ...activeIds]) {
+      const record = await liveSession.getSessionRecord(sessionId);
+      if (record != null) {
+        await liveSession.deleteSessionRecord(sessionId, roundId, record.userId, record.guestUuid);
+      } else {
+        await liveSession.removeFromHeartbeat(sessionId);
+      }
+    }
+    await liveQueue.clearRound("round", roundId);
+    await liveActive.clearRound(roundId);
+
+    // Redis: 좌석락/내hold 키 정리 (패턴 스캔)
+    for (const prefix of [`seat:round:${roundId}:`, `myhold:round:${roundId}:`]) {
+      let cursor = "0";
+      do {
+        const [next, keys] = await redis.scan(cursor, "MATCH", `${prefix}*`, "COUNT", 200);
+        cursor = next;
+        if (keys.length > 0) await redis.del(...keys);
+      } while (cursor !== "0");
+    }
+  }
+
   await pool.query(
     `DELETE FROM live_rounds WHERE id = ANY($1::int[])`,
     [roundIds],

@@ -11,6 +11,7 @@
 
 import request from "supertest";
 import app from "../app";
+import pool from "../config/db";
 import {
   createTestUser,
   createTestRound,
@@ -131,4 +132,8 @@ describe("회차 내 게스트 닉네임 중복 허용", () => {
       .send({ nickname });
     expect(memberRes.status).toBe(201);
   });
+});
+
+afterAll(async () => {
+  await pool.end();
 });

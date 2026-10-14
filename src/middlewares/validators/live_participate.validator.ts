@@ -64,6 +64,28 @@ const confirmBodyValidator = [
     .withMessage("seatLabel은 '{zoneId}-{rowLabel}-{seatNumber}' 3-segment 형식이어야 합니다 (예: FC-1-1, GA-스탠딩L-3-1)."),
 ];
 
+/** sessionId 쿼리 파라미터 — SSE 스트림처럼 sessionId 를 path 가 아닌 query 로 받는 라우트용 */
+const sessionIdQueryValidator = [
+  query("sessionId")
+    .trim()
+    .notEmpty()
+    .withMessage("sessionId는 필수입니다.")
+    .matches(/^[0-9a-f]{20}$/)
+    .withMessage("sessionId 형식이 올바르지 않습니다."),
+];
+
+/** GET /rounds/:roundId/seats/stream?sessionId=... */
+const seatsStreamQueryValidator = [
+  ...roundIdParamValidator,
+  ...sessionIdQueryValidator,
+];
+
+/** GET /rounds/:roundId/queue/stream?sessionId=... */
+const queueStreamQueryValidator = [
+  ...roundIdParamValidator,
+  ...sessionIdQueryValidator,
+];
+
 /** GET /last-round?limit=N — 선택적 limit 파라미터 (1~30 정수) */
 const getLastRoundQueryValidator = [
   query("limit")
@@ -72,11 +94,33 @@ const getLastRoundQueryValidator = [
     .withMessage("limit은 1~30 범위의 정수여야 합니다."),
 ];
 
+/**
+ * GET /rounds/:roundId/rankings?page&size
+ *
+ * page 상한을 두지 않는다 — 누적 랭킹과 달리 회차 참가자는 전원 조회 대상이다.
+ * size 상한 100 은 누적 랭킹과 맞춘다 (한 번에 퍼가는 양 제한).
+ */
+const getRoundRankingsQueryValidator = [
+  ...roundIdParamValidator,
+  query("page")
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage("page는 1 이상의 정수여야 합니다."),
+  query("size")
+    .optional()
+    .isInt({ min: 1, max: 100 })
+    .withMessage("size는 1~100 사이의 정수여야 합니다."),
+];
+
 export {
   roundIdParamValidator,
+  getRoundRankingsQueryValidator,
   sessionIdParamValidator,
+  sessionIdQueryValidator,
   createSessionBodyValidator,
   holdBodyValidator,
   confirmBodyValidator,
   getLastRoundQueryValidator,
+  seatsStreamQueryValidator,
+  queueStreamQueryValidator,
 };

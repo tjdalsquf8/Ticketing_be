@@ -462,3 +462,7 @@ describe("Rankings API", () => {
     });
   });
 });
+
+afterAll(async () => {
+  await pool.end();
+});

@@ -1,7 +1,10 @@
 import rateLimit, { Options, ipKeyGenerator } from "express-rate-limit";
 import { Request, Response } from "express";
 
-const skipInTest = () => process.env.NODE_ENV === "test";
+// LOAD_TEST=true 는 로컬 k6 부하 테스트 전용 — 동시 VU가 전부 같은 IP로 잡혀
+// 리미터에 곧장 걸리는 걸 우회한다. 프로덕션 .env 에는 절대 넣지 말 것.
+const skipInTest = () =>
+  process.env.NODE_ENV === "test" || process.env.LOAD_TEST === "true";
 
 function envelopeHandler(code: string, message: string) {
   return (_req: Request, res: Response, _next: unknown, options: Options) => {
@@ -107,6 +110,10 @@ export const globalLimiter = rateLimit({
 // 도는 구간이 있어 참여자 1명이 분당 90회 이상을 정상적으로 소비한다. 60/min 은
 // 혼자서도 넘겼고, IP 기반이라 같은 공유기의 3명이 60 을 나눠 쓰다 즉시 429 가 됐다.
 // → 상한을 180/min 으로 올리고, 다른 리미터들과 같이 "참여자 1명" 단위로 카운트한다.
+//
+// 좌석맵·대기열 모두 이후 폴링에서 SSE 스트림(GET .../seats/stream, GET .../queue/stream)
+// 으로 전환됨 — 연결 1회만 이 통을 소비하고 이후 push 는 카운트되지 않는다. 상한 수치
+// 자체는 참여 흐름 중 hold/confirm 등 다른 요청 여유를 위해 그대로 유지한다.
 //
 // 키 우선순위: 로그인 유저 id → 게스트 uuid 쿠키 → IP.
 // live 는 비로그인 게스트도 참여하므로 guest_uuid 까지 키로 인정해야 NAT 뒤 게스트끼리
@@ -230,9 +237,10 @@ export const eventActionLimiter = rateLimit({
   ),
 });
 
-// 이벤트 티켓팅 세션 후속 호출(queue/seats/hold/confirm) 전용. 좌석맵 폴링·좌석 잡기
+// 이벤트 티켓팅 세션 후속 호출(queue-stream/seats-stream/hold/confirm) 전용. 좌석 잡기
 // 시도가 반복될 수 있어 완만하게, 그러나 인증 유저 기준 상한을 둔다. authMiddleware
-// 뒤 배치. 60/min 을 유저 단위로 부여.
+// 뒤 배치. 60/min 을 유저 단위로 부여. *-stream 은 SSE 연결 1회만 이 통을
+// 소비한다(이후 push 는 카운트되지 않음).
 export const eventSessionLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,

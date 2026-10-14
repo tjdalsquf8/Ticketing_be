@@ -171,3 +171,7 @@ describe("Notices API", () => {
     expect(match).toBeUndefined();
   });
 });
+
+afterAll(async () => {
+  await pool.end();
+});

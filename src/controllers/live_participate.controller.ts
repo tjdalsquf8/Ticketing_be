@@ -3,6 +3,14 @@ import { validationResult } from "express-validator";
 import * as participateService from "../services/live_participate.service";
 import * as usersService from "../services/users.service";
 import { AppError } from "../middlewares/errorHandler";
+import config from "../config";
+import {
+  seatEvents,
+  seatChannel,
+  SeatEventPayload,
+  SeatContextType,
+} from "../events/seatEvents";
+import { queueEvents, queueChannel } from "../events/queueEvents";
 
 // ─── 내부 헬퍼 ───────────────────────────────────────────────────────────────
 
@@ -39,6 +47,7 @@ function handleValidation(req: Request, next: NextFunction): boolean {
  *   SEAT_ALREADY_CONFIRMED  → 409  (이미 확정·판매됨)
  *   SEAT_UNAVAILABLE        → 409  (그 외 비정상 상태 fallback)
  *   HOLD_EXPIRED            → 409
+ *   ALREADY_COMPLETED       → 409  (완료된 세션은 이탈 대상이 아님)
  *   기타                     → next(err) 로 전역 핸들러 위임
  */
 function handleServiceError(err: unknown, next: NextFunction): void {
@@ -71,6 +80,9 @@ function handleServiceError(err: unknown, next: NextFunction): void {
         next(new AppError(409, e.code, e.message));
         return;
       case "HOLD_EXPIRED":
+        next(new AppError(409, e.code, e.message));
+        return;
+      case "ALREADY_COMPLETED":
         next(new AppError(409, e.code, e.message));
         return;
       default:
@@ -164,66 +176,180 @@ const postCreateSession = async (
 };
 
 /**
- * GET /api/live/sessions/:sessionId/queue
+ * GET /api/live/rounds/:roundId/queue/stream?sessionId=...
+ * GET /api/events/:eventId/queue/stream?sessionId=...
  *
- * sessionId(param) 로 getQueueStatus 서비스를 호출한다.
- * Cache-Control: no-store 를 설정해 폴링 캐시를 차단한다.
+ * 대기열 순번 SSE 스트림. REST 폴링(GET .../queue)을 완전히 대체한다.
+ * 좌석 스트림과 달리 payload 자체에 순번을 담지 않는다 — 순번은 세션마다 다르게
+ * 계산되는 값이라, queueEvents 는 "이 회차/이벤트 대기열에 변화가 생겼다"는 신호만
+ * 보내고, 신호를 받을 때마다 기존 getQueueStatus() 를 다시 호출해 본인 순번을
+ * 재계산해서 내려준다 — 폴링 때와 동일한 계산 로직을 그대로 재사용한다.
  */
-const getQueue = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
-  if (handleValidation(req, next)) return;
+function createQueueStreamHandler(contextType: SeatContextType) {
+  const contextParamName = contextType === "round" ? "roundId" : "eventId";
 
-  try {
-    const sessionId = req.params.sessionId as string;
+  return async (req: Request, res: Response, next: NextFunction) => {
+    if (handleValidation(req, next)) return;
+
+    const contextId = parseInt(req.params[contextParamName] as string, 10);
+    const sessionId = req.query.sessionId as string;
     const userId = req.user?.id ?? null;
     const guestUuid = userId == null ? resolveGuestUuid(req) : undefined;
 
-    const data = await participateService.getQueueStatus({
-      sessionId,
-      userId,
-      guestUuid: guestUuid ?? null,
-    });
+    const fetchStatus = () =>
+      participateService.getQueueStatus({
+        sessionId,
+        userId,
+        guestUuid: guestUuid ?? null,
+      });
 
-    res.setHeader("Cache-Control", "no-store");
-    res.status(200).json({ success: true, data });
-  } catch (err) {
-    handleServiceError(err, next);
-  }
-};
+    let snapshot;
+    try {
+      snapshot = await fetchStatus();
+    } catch (err) {
+      handleServiceError(err, next);
+      return;
+    }
+
+    if (snapshot.contextType !== contextType || snapshot.contextId !== contextId) {
+      next(new AppError(404, "SESSION_NOT_FOUND", "세션을 찾을 수 없습니다"));
+      return;
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    const send = (event: string, data: unknown): void => {
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    send("snapshot", snapshot);
+
+    const channel = queueChannel(contextType, contextId);
+    const onQueueChanged = (): void => {
+      fetchStatus()
+        .then((fresh) => send("queue_update", fresh))
+        .catch((err) => {
+          console.error("[live/queue-stream] refetch failed:", err);
+        });
+    };
+    queueEvents.on(channel, onQueueChanged);
+
+    // ttl 의 절반 주기로 갱신해 항상 최소 2회분 여유를 둔다 (좌석 스트림과 동일 정책).
+    const heartbeatMs = Math.max(
+      1000,
+      Math.min(15000, Math.floor((config.live.sessionHeartbeatTtlSeconds * 1000) / 2)),
+    );
+    const heartbeat = setInterval(() => {
+      res.write(`: ping\n\n`);
+      participateService.touchSessionHeartbeat(sessionId).catch((err) => {
+        console.error("[live/queue-stream] heartbeat failed:", err);
+      });
+    }, heartbeatMs);
+
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      queueEvents.off(channel, onQueueChanged);
+      res.end();
+    });
+  };
+}
+
+const getQueueStream = createQueueStreamHandler("round");
+const getEventQueueStream = createQueueStreamHandler("event");
 
 /**
- * GET /api/live/sessions/:sessionId/seats
+ * GET /api/live/rounds/:roundId/seats/stream?sessionId=...
+ * GET /api/events/:eventId/seats/stream?sessionId=...
  *
- * sessionId(param) 로 getSeats 서비스를 호출한다.
- * Cache-Control: no-store 를 설정해 좌석 상태 캐시를 차단한다.
+ * 좌석맵 SSE 스트림. REST 폴링(GET .../seats)을 완전히 대체한다.
+ * sessionId(query) 로 소유자·active 상태를 검증하고, 그 세션이 실제로 path 의
+ * roundId/eventId 소속인지 확인한다(다른 회차·이벤트 세션으로 잘못 구독하는 것 방지).
+ *
+ * 연결 성공 시:
+ *   1. 기존 getSeats() 스냅샷을 "snapshot" 이벤트로 1회 전송
+ *   2. round/event 채널을 구독해 이후 좌석 변경을 "seat_update" 이벤트로 push
+ *   3. heartbeat 주기마다 (a) 프록시/브라우저 idle timeout 방지용 SSE 주석 전송,
+ *      (b) live_sessions.last_seen_at 갱신 — 폴링이 대신하던 "보고 있다" 신호를
+ *      SSE 커넥션이 대신 남겨야 sweepStaleSessions 크론이 활성 유저를 방치 세션으로
+ *      오판해 끊어버리지 않는다.
  */
-const getSeats = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
-  if (handleValidation(req, next)) return;
+function createSeatsStreamHandler(contextType: SeatContextType) {
+  const contextParamName = contextType === "round" ? "roundId" : "eventId";
 
-  try {
-    const sessionId = req.params.sessionId as string;
+  return async (req: Request, res: Response, next: NextFunction) => {
+    if (handleValidation(req, next)) return;
+
+    const contextId = parseInt(req.params[contextParamName] as string, 10);
+    const sessionId = req.query.sessionId as string;
     const userId = req.user?.id ?? null;
     const guestUuid = userId == null ? resolveGuestUuid(req) : undefined;
 
-    const data = await participateService.getSeats({
-      sessionId,
-      userId,
-      guestUuid: guestUuid ?? null,
-    });
+    let snapshot;
+    try {
+      snapshot = await participateService.getSeats({
+        sessionId,
+        userId,
+        guestUuid: guestUuid ?? null,
+      });
+    } catch (err) {
+      handleServiceError(err, next);
+      return;
+    }
 
-    res.setHeader("Cache-Control", "no-store");
-    res.status(200).json({ success: true, data });
-  } catch (err) {
-    handleServiceError(err, next);
-  }
-};
+    // sessionId 는 유효하지만 다른 회차/이벤트 소속인 경우 — 존재 여부 오라클 차단을
+    // 위해 FORBIDDEN 과 동일하게 404 SESSION_NOT_FOUND 로 통일한다.
+    if (snapshot.contextType !== contextType || snapshot.contextId !== contextId) {
+      next(new AppError(404, "SESSION_NOT_FOUND", "세션을 찾을 수 없습니다"));
+      return;
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    const send = (event: string, data: unknown): void => {
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    send("snapshot", { seats: snapshot.seats, myHold: snapshot.myHold });
+
+    const channel = seatChannel(contextType, contextId);
+    const onSeatUpdate = (payload: SeatEventPayload): void => {
+      send("seat_update", payload);
+    };
+    seatEvents.on(channel, onSeatUpdate);
+
+    // ttl 의 절반 주기로 갱신해 항상 최소 2회분 여유를 둔다. 관리자가 ttl 을
+    // 짧게(10초) 잡아도 heartbeat 가 못 따라가 세션이 끊기는 일이 없도록 함.
+    const heartbeatMs = Math.max(
+      1000,
+      Math.min(15000, Math.floor((config.live.sessionHeartbeatTtlSeconds * 1000) / 2)),
+    );
+    const heartbeat = setInterval(() => {
+      res.write(`: ping\n\n`);
+      participateService.touchSessionHeartbeat(sessionId).catch((err) => {
+        console.error("[live/seats-stream] heartbeat failed:", err);
+      });
+    }, heartbeatMs);
+
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      seatEvents.off(channel, onSeatUpdate);
+      res.end();
+    });
+  };
+}
+
+const getSeatsStream = createSeatsStreamHandler("round");
+const getEventSeatsStream = createSeatsStreamHandler("event");
 
 /**
  * POST /api/live/sessions/:sessionId/hold
@@ -288,4 +414,44 @@ const postConfirm = async (
   }
 };
 
-export { postCreateSession, getQueue, getSeats, postHold, postConfirm };
+/**
+ * DELETE /api/live/sessions/:sessionId
+ *
+ * 좌석 화면·대기열 오버레이에서 "나가기"를 누를 때 호출한다.
+ * active/queued 세션을 종료(failed)하고, hold 중이던 좌석이 있으면 반환한다.
+ * completed 세션은 409 ALREADY_COMPLETED.
+ */
+const deleteSession = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  if (handleValidation(req, next)) return;
+
+  try {
+    const sessionId = req.params.sessionId as string;
+    const userId = req.user?.id ?? null;
+    const guestUuid = userId == null ? resolveGuestUuid(req) : undefined;
+
+    const data = await participateService.abandonSession({
+      sessionId,
+      userId,
+      guestUuid: guestUuid ?? null,
+    });
+
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    handleServiceError(err, next);
+  }
+};
+
+export {
+  postCreateSession,
+  getQueueStream,
+  getEventQueueStream,
+  getSeatsStream,
+  getEventSeatsStream,
+  postHold,
+  postConfirm,
+  deleteSession,
+};

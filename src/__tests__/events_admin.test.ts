@@ -63,6 +63,7 @@ afterAll(async () => {
   await cleanupTestEvents(createdEventIds);
   await cleanupTestSeries(createdSeriesIds);
   await cleanupTestEvUsers();
+  await pool.end();
 });
 
 // ─── 테스트 스위트 ─────────────────────────────────────────────────────────────

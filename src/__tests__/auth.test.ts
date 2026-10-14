@@ -1,5 +1,6 @@
 import request from "supertest";
 import app from "../app";
+import pool from "../config/db";
 import {
   cleanupTestUsers,
   uniqueEmail,
@@ -243,4 +244,8 @@ describe("Auth API", () => {
       expect(res.body.error.code).toBe("AUTH_TOKEN_MISSING");
     });
   });
+});
+
+afterAll(async () => {
+  await pool.end();
 });

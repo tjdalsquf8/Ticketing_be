@@ -47,6 +47,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await cleanupTestEvents(createdEventIds);
   await cleanupTestEvUsers();
+  await pool.end();
 });
 
 // ─── 테스트 스위트 ─────────────────────────────────────────────────────────────

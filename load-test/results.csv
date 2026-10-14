@@ -1,0 +1,2 @@
+timestamp,label,poolMax,batchCap,createSession_p95_ms,hold_p95_ms,queueWait_p95_ms,seatConfirmSuccess,seatConfirmConflict,seatConfirmError
+2026-09-27T11:48:23Z,pool30_batch20,30,20,360.22,2240,22840.4,830,80,24

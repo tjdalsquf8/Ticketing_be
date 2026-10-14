@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict Ngng7tiX8ucHiOPrvNFC0IJjTTJpAZx6wJ89ykbuIYKPiyW8ImaXswVuSGwrt1I
+\restrict 5wDRq5fRnTs66Is7DMuHAC8MQfVdFor5Sxu3S346TWAKhZ72KchljZXhtU1yVcO
 
 -- Dumped from database version 16.13 (Postgres.app)
 -- Dumped by pg_dump version 18.4
@@ -435,6 +435,7 @@ CREATE TABLE public.live_sessions (
     status character varying(16) DEFAULT 'active'::character varying NOT NULL,
     queue_position integer,
     event_id integer,
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT live_sessions_check CHECK (((user_id IS NOT NULL) OR (guest_uuid IS NOT NULL))),
     CONSTRAINT live_sessions_context_check CHECK (((round_id IS NOT NULL) OR (event_id IS NOT NULL))),
     CONSTRAINT live_sessions_status_check CHECK (((status)::text = ANY (ARRAY['queued'::text, 'active'::text, 'completed'::text, 'failed'::text])))
@@ -1165,6 +1166,13 @@ CREATE INDEX idx_live_sessions_event_id ON public.live_sessions USING btree (eve
 
 
 --
+-- Name: idx_live_sessions_heartbeat_sweep; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_live_sessions_heartbeat_sweep ON public.live_sessions USING btree (status, last_seen_at) WHERE ((status)::text = ANY ((ARRAY['queued'::character varying, 'active'::character varying])::text[]));
+
+
+--
 -- Name: idx_live_sessions_round_elapsed_completed; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1474,5 +1482,5 @@ ALTER TABLE ONLY public.practice_sessions
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Ngng7tiX8ucHiOPrvNFC0IJjTTJpAZx6wJ89ykbuIYKPiyW8ImaXswVuSGwrt1I
+\unrestrict 5wDRq5fRnTs66Is7DMuHAC8MQfVdFor5Sxu3S346TWAKhZ72KchljZXhtU1yVcO
 
