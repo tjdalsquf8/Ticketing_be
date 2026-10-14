@@ -75,3 +75,7 @@ describe("Users API", () => {
     });
   });
 });
+
+afterAll(async () => {
+  await pool.end();
+});

@@ -3,8 +3,8 @@
  *
  * 테스트 대상:
  *   POST   /api/live/rounds/:roundId/sessions
- *   GET    /api/live/sessions/:sessionId/queue
- *   GET    /api/live/sessions/:sessionId/seats
+ *   GET    /api/live/rounds/:roundId/queue/stream
+ *   GET    /api/live/rounds/:roundId/seats/stream
  *   POST   /api/live/sessions/:sessionId/hold
  *   POST   /api/live/sessions/:sessionId/confirm
  */
@@ -22,8 +22,14 @@ import {
   cleanupTestRounds,
   cleanupTestLiveUsers,
 } from "./helpers/live.helper";
+import { readSseEvent, openSseStream } from "./helpers/sse.helper";
 import { promoteQueuedSessions } from "../jobs/liveScheduler";
 import config from "../config";
+import * as liveSession from "../services/live_session.redis";
+import * as liveQueue from "../services/live_queue.redis";
+import * as liveActive from "../services/live_active.redis";
+import * as liveSeatLock from "../services/live_seat_lock.redis";
+import { insertRedisLiveSession, insertRedisSeatHold, testActorKey } from "./helpers/live.helper";
 
 // ─── 전역 상태 ─────────────────────────────────────────────────────────────────
 
@@ -44,6 +50,7 @@ async function loginAgent(email: string, password: string) {
 afterAll(async () => {
   await cleanupTestRounds(createdRoundIds);
   await cleanupTestLiveUsers();
+  await pool.end();
 });
 
 // ─── 테스트 스위트 ─────────────────────────────────────────────────────────────
@@ -68,12 +75,10 @@ describe("Live Participate API", () => {
       expect(res.body.data.sessionId).toBeDefined();
       expect(["active", "queued"]).toContain(res.body.data.status);
 
-      // partial unique index: 같은 user_id + round_id 조합 검증
-      const dbCheck = await pool.query(
-        `SELECT COUNT(*) AS cnt FROM live_sessions WHERE round_id = $1 AND user_id = $2`,
-        [roundId, userId],
-      );
-      expect(parseInt(dbCheck.rows[0].cnt, 10)).toBe(1);
+      // 중복 참여 방지 검증: Redis dedup 포인터가 방금 생성된 sessionId를 정확히 가리키는지
+      // (queued/active 세션은 Postgres에 안 쓰이므로 partial unique index 대신 여기서 확인)
+      const dedupSessionId = await liveSession.findExistingSessionId(roundId, userId, null);
+      expect(dedupSessionId).toBe(res.body.data.sessionId);
     });
 
     it("[1-2] 게스트가 open 회차에 세션 생성 → 201, guest_uuid 쿠키 전달", async () => {
@@ -147,12 +152,9 @@ describe("Live Participate API", () => {
       expect(res.status).toBe(201);
       expect(res.body.data.sessionId).toBeDefined();
 
-      // DB에서 nickname이 user.name으로 저장됐는지 확인
-      const dbCheck = await pool.query(
-        `SELECT nickname FROM live_sessions WHERE session_id = $1`,
-        [res.body.data.sessionId],
-      );
-      expect(dbCheck.rows[0].nickname).toBe(name);
+      // 세션은 queued/active 동안 Redis에 있다 (Postgres는 confirm 시점에만 쓴다)
+      const record = await liveSession.getSessionRecord(res.body.data.sessionId);
+      expect(record?.nickname).toBe(name);
     });
 
     it("[1-N2] 회원이 body nickname 있으면 그 값 사용", async () => {
@@ -170,11 +172,8 @@ describe("Live Participate API", () => {
 
       expect(res.status).toBe(201);
 
-      const dbCheck = await pool.query(
-        `SELECT nickname FROM live_sessions WHERE session_id = $1`,
-        [res.body.data.sessionId],
-      );
-      expect(dbCheck.rows[0].nickname).toBe(customNickname);
+      const record = await liveSession.getSessionRecord(res.body.data.sessionId);
+      expect(record?.nickname).toBe(customNickname);
     });
 
     it("[1-N3] 게스트가 body nickname 없이 세션 생성 → 400 NICKNAME_REQUIRED", async () => {
@@ -197,10 +196,10 @@ describe("Live Participate API", () => {
       const { roundId } = await createTestRound({ status: "open" });
       createdRoundIds.push(roundId);
 
-      // config.live.activeCapacity 개의 active 세션을 미리 삽입해 정원 채우기
+      // 정원 체크는 이제 Redis 활성 집합(SCARD) 기준이므로 거기에 직접 채운다.
       const capacity = config.live.activeCapacity;
       for (let i = 0; i < capacity; i++) {
-        await insertTestSession({
+        await insertRedisLiveSession({
           roundId,
           guestUuid: uuidv4(),
           nickname: `filler_${i}`,
@@ -222,90 +221,81 @@ describe("Live Participate API", () => {
     });
   });
 
-  // ─── [2] 대기열 상태 조회 ────────────────────────────────────────────────
+  // ─── [2] 대기열 SSE 스트림 ───────────────────────────────────────────────
 
-  describe("[2] GET /api/live/sessions/:sessionId/queue — 대기열 상태 조회", () => {
-    it("[2-1] queued 세션 조회 후 앞 사람 promote 시 순번 감소 확인", async () => {
+  describe("[2] GET /api/live/rounds/:roundId/queue/stream — 대기열 순번 SSE 스트림", () => {
+    it("[2-1] snapshot 수신 후 앞 사람 promote 시 push 로 순번 감소 확인", async () => {
       const { roundId } = await createTestRound({ status: "open" });
       createdRoundIds.push(roundId);
 
-      // 정원을 가득 채운 뒤
+      // 정원을 가득 채운 뒤 (Redis 활성 집합)
       const capacity = config.live.activeCapacity;
+      const fillerSessionIds: string[] = [];
       for (let i = 0; i < capacity; i++) {
-        await insertTestSession({
+        const { sessionId } = await insertRedisLiveSession({
           roundId,
           guestUuid: uuidv4(),
           nickname: `fill_${i}`,
           status: "active",
         });
+        fillerSessionIds.push(sessionId);
       }
 
-      // 대기열에 3명 삽입
-      const queuedSessionIds: string[] = [];
+      // 대기열에 3명 삽입 (내 앞사람들, Redis ZSET)
       for (let i = 0; i < 3; i++) {
-        const { sessionId } = await insertTestSession({
+        await insertRedisLiveSession({
           roundId,
           guestUuid: uuidv4(),
           nickname: `q_${i}`,
           status: "queued",
-          queuePosition: i + 1,
         });
-        queuedSessionIds.push(sessionId);
       }
 
-      // 3번째 사람(queue_position=3) 의 현재 순번 조회
-      const targetSession = queuedSessionIds[2]; // 마지막
-      const { email: e3, password: p3 } = await createTestUser();
-      const agent3 = await loginAgent(e3, p3);
-
-      // 직접 세션 소유권이 없으므로 guest_uuid 방식으로 조회
       const guestUuid3 = uuidv4();
-      const { sessionId: ownedSession } = await insertTestSession({
+      const { sessionId: ownedSession } = await insertRedisLiveSession({
         roundId,
         guestUuid: guestUuid3,
         nickname: "q_owned",
         status: "queued",
-        queuePosition: 4,
       });
 
-      const resBefore = await request(app)
-        .get(`/api/live/sessions/${ownedSession}/queue`)
-        .set("Cookie", `guest_uuid=${guestUuid3}`);
-
-      expect(resBefore.status).toBe(200);
-      const posBefore = resBefore.body.data.queuePosition;
-      expect(posBefore).toBeGreaterThan(0);
-
-      // active 1개를 completed 로 전환 → 빈 슬롯 생성 후 promote 직접 호출
-      await pool.query(
-        `UPDATE live_sessions SET status = 'completed'
-         WHERE id = (
-           SELECT id FROM live_sessions
-           WHERE round_id = $1 AND status = 'active'
-           LIMIT 1
-         )`,
-        [roundId],
+      const stream = openSseStream(
+        app,
+        `/api/live/rounds/${roundId}/queue/stream?sessionId=${ownedSession}`,
+        { Cookie: `guest_uuid=${guestUuid3}` },
       );
-      await promoteQueuedSessions();
 
-      const resAfter = await request(app)
-        .get(`/api/live/sessions/${ownedSession}/queue`)
-        .set("Cookie", `guest_uuid=${guestUuid3}`);
+      try {
+        const snapshot = await stream.next();
+        expect(snapshot.status).toBe(200);
+        expect(snapshot.event).toBe("snapshot");
+        const before = snapshot.data as { queuePosition: number | null; ready: boolean };
+        expect(before.queuePosition).toBeGreaterThan(0);
+        const posBefore = before.queuePosition as number;
 
-      // 승격 또는 순번 감소
-      expect(resAfter.status).toBe(200);
-      const posAfter = resAfter.body.data.queuePosition;
-      // ready=true (active 로 전환) 이거나 순번이 감소했어야 함
-      const isPromoted = resAfter.body.data.ready === true;
-      const isDecreased = posAfter !== null && posAfter < posBefore;
-      expect(isPromoted || isDecreased).toBe(true);
+        // active 1개를 "완료"시켜 빈 슬롯 생성 (confirm이 하는 것과 같은 Redis 정리) 후 promote 직접 호출
+        const freedSessionId = fillerSessionIds[0];
+        await liveActive.leaveActive(roundId, freedSessionId);
+        await promoteQueuedSessions();
+
+        // 연결을 유지한 채로 push 되는 다음 이벤트를 기다린다 (폴링 재요청이 아님)
+        const update = await stream.next();
+        expect(update.event).toBe("queue_update");
+        const after = update.data as { queuePosition: number | null; ready: boolean };
+
+        const isPromoted = after.ready === true;
+        const isDecreased = after.queuePosition !== null && after.queuePosition < posBefore;
+        expect(isPromoted || isDecreased).toBe(true);
+      } finally {
+        stream.close();
+      }
     });
   });
 
-  // ─── [3] 좌석 목록 조회 ──────────────────────────────────────────────────
+  // ─── [3] 좌석 SSE 스트림 ─────────────────────────────────────────────────
 
-  describe("[3] GET /api/live/sessions/:sessionId/seats — 좌석 목록 조회", () => {
-    it("[3-1] active 세션은 좌석 목록 반환", async () => {
+  describe("[3] GET /api/live/rounds/:roundId/seats/stream — 좌석 SSE 스트림", () => {
+    it("[3-1] active 세션은 최초 snapshot 이벤트로 좌석 목록 반환", async () => {
       const { roundId, seatLabels } = await createTestRound({ status: "open" });
       createdRoundIds.push(roundId);
 
@@ -317,15 +307,19 @@ describe("Live Participate API", () => {
         status: "active",
       });
 
-      const res = await request(app)
-        .get(`/api/live/sessions/${sessionId}/seats`)
-        .set("Cookie", `guest_uuid=${guestUuid}`);
+      const { status, event, data } = await readSseEvent(
+        app,
+        `/api/live/rounds/${roundId}/seats/stream?sessionId=${sessionId}`,
+        { Cookie: `guest_uuid=${guestUuid}` },
+      );
 
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.body.data.seats)).toBe(true);
-      expect(res.body.data.seats.length).toBe(seatLabels.length);
-      expect(res.body.data.seats[0]).toHaveProperty("seatLabel");
-      expect(res.body.data.seats[0]).toHaveProperty("status");
+      expect(status).toBe(200);
+      expect(event).toBe("snapshot");
+      const seatsData = data as { seats: Array<{ seatLabel: string; status: string }> };
+      expect(Array.isArray(seatsData.seats)).toBe(true);
+      expect(seatsData.seats.length).toBe(seatLabels.length);
+      expect(seatsData.seats[0]).toHaveProperty("seatLabel");
+      expect(seatsData.seats[0]).toHaveProperty("status");
     });
 
     it("[3-2] queued 세션은 403 NOT_ACTIVE", async () => {
@@ -341,12 +335,37 @@ describe("Live Participate API", () => {
         queuePosition: 1,
       });
 
-      const res = await request(app)
-        .get(`/api/live/sessions/${sessionId}/seats`)
-        .set("Cookie", `guest_uuid=${guestUuid}`);
+      const { status, body } = await readSseEvent(
+        app,
+        `/api/live/rounds/${roundId}/seats/stream?sessionId=${sessionId}`,
+        { Cookie: `guest_uuid=${guestUuid}` },
+      );
 
-      expect(res.status).toBe(403);
-      expect(res.body.error.code).toBe("NOT_ACTIVE");
+      expect(status).toBe(403);
+      expect((body as { error: { code: string } }).error.code).toBe("NOT_ACTIVE");
+    });
+
+    it("[3-3] 다른 회차 소속 sessionId 로 접근 → 404 SESSION_NOT_FOUND", async () => {
+      const { roundId: roundA } = await createTestRound({ status: "open" });
+      const { roundId: roundB } = await createTestRound({ status: "open" });
+      createdRoundIds.push(roundA, roundB);
+
+      const guestUuid = uuidv4();
+      const { sessionId } = await insertTestSession({
+        roundId: roundA,
+        guestUuid,
+        nickname: "scope_checker",
+        status: "active",
+      });
+
+      const { status, body } = await readSseEvent(
+        app,
+        `/api/live/rounds/${roundB}/seats/stream?sessionId=${sessionId}`,
+        { Cookie: `guest_uuid=${guestUuid}` },
+      );
+
+      expect(status).toBe(404);
+      expect((body as { error: { code: string } }).error.code).toBe("SESSION_NOT_FOUND");
     });
   });
 
@@ -375,12 +394,9 @@ describe("Live Participate API", () => {
       expect(res.body.data.seatLabel).toBe(seatLabels[0]);
       expect(res.body.data.expiresAt).toBeDefined();
 
-      // DB 확인: 좌석이 held 로 바뀌었는지
-      const dbSeat = await pool.query(
-        `SELECT status FROM live_seats WHERE round_id = $1 AND seat_label = $2`,
-        [roundId, seatLabels[0]],
-      );
-      expect(dbSeat.rows[0].status).toBe("held");
+      // hold 상태는 이제 Redis가 관리한다 (Postgres live_seats는 sold만 반영)
+      const myHold = await liveSeatLock.getMyHold(roundId, testActorKey({ guestUuid }));
+      expect(myHold?.seatLabel).toBe(seatLabels[0]);
     });
 
     it("[4-2] 이미 held 좌석 재시도 → 409 SEAT_ALREADY_HELD", async () => {
@@ -449,19 +465,13 @@ describe("Live Participate API", () => {
       expect(res.status).toBe(200);
       expect(res.body.data.seatLabel).toBe(seatLabels[1]);
 
-      // 첫 번째 좌석은 available 로 복구
-      const oldSeat = await pool.query(
-        `SELECT status FROM live_seats WHERE round_id = $1 AND seat_label = $2`,
-        [roundId, seatLabels[0]],
-      );
-      expect(oldSeat.rows[0].status).toBe("available");
+      // hold 상태는 Redis 기준 — 첫 번째 좌석은 자동 해제, 두 번째만 남아있어야 함
+      const heldLabels = await liveSeatLock.scanHeldLabels(roundId);
+      expect(heldLabels.has(seatLabels[0])).toBe(false);
+      expect(heldLabels.has(seatLabels[1])).toBe(true);
 
-      // 두 번째 좌석은 held
-      const newSeat = await pool.query(
-        `SELECT status FROM live_seats WHERE round_id = $1 AND seat_label = $2`,
-        [roundId, seatLabels[1]],
-      );
-      expect(newSeat.rows[0].status).toBe("held");
+      const myHold = await liveSeatLock.getMyHold(roundId, testActorKey({ guestUuid }));
+      expect(myHold?.seatLabel).toBe(seatLabels[1]);
     });
   });
 

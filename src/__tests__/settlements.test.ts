@@ -108,6 +108,7 @@ afterAll(async () => {
     await pool.query(`DELETE FROM gifticons WHERE id = ANY($1::int[])`, [createdGifticonIds]);
   }
   await cleanupTestEvUsers();
+  await pool.end();
 });
 
 // ─── 테스트 스위트 ─────────────────────────────────────────────────────────────

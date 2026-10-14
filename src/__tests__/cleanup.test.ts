@@ -121,3 +121,7 @@ describe("Cleanup Cron Logic", () => {
     });
   });
 });
+
+afterAll(async () => {
+  await pool.end();
+});

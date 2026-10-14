@@ -2,8 +2,8 @@
  * 이벤트 티켓팅 세션 흐름 통합 테스트
  *
  * POST /api/events/:eventId/sessions
- * GET  /api/events/sessions/:sessionId/queue
- * GET  /api/events/sessions/:sessionId/seats
+ * GET  /api/events/:eventId/queue/stream
+ * GET  /api/events/:eventId/seats/stream
  * POST /api/events/sessions/:sessionId/hold
  * POST /api/events/sessions/:sessionId/confirm
  */
@@ -20,6 +20,7 @@ import {
   cleanupTestEvUsers,
   type TestUserResult,
 } from "./helpers/events.helper";
+import { readSseEvent, toCookieHeader } from "./helpers/sse.helper";
 
 // ─── 전역 상태 ─────────────────────────────────────────────────────────────────
 
@@ -66,6 +67,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await cleanupTestEvents(createdEventIds);
   await cleanupTestEvUsers();
+  await pool.end();
 });
 
 // ─── 테스트 스위트 ─────────────────────────────────────────────────────────────
@@ -179,55 +181,82 @@ describe("Events Session API (ticketing flow)", () => {
     });
   });
 
-  // ─── [2] GET /api/events/sessions/:sessionId/queue ───────────────────────────
+  // ─── [2] GET /api/events/:eventId/queue/stream ───────────────────────────────
 
-  describe("[2] GET /api/events/sessions/:sessionId/queue — 세션 상태/순번 조회", () => {
-    it("[2-1] active 세션 queue 조회 → 200, status 반환", async () => {
+  describe("[2] GET /api/events/:eventId/queue/stream — 대기열 순번 SSE 스트림", () => {
+    it("[2-1] active 세션 snapshot 이벤트 → status 반환", async () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
       const user  = await createTestUser();
       await registerAndEnter(eventId, user.userId);
 
-      const agent = await loginAgent(user.email, user.password);
+      const agent = request.agent(app);
+      const loginRes = await agent
+        .post("/api/auth/login")
+        .set("Content-Type", "application/json")
+        .send({ email: user.email, password: user.password });
+      const cookie = toCookieHeader(loginRes.headers["set-cookie"]);
+
       const createRes = await agent
         .post(`/api/events/${eventId}/sessions`)
         .set("Content-Type", "application/json");
 
       const { sessionId } = createRes.body.data;
 
-      const res = await agent.get(`/api/events/sessions/${sessionId}/queue`);
+      const { status, event, data } = await readSseEvent(
+        app,
+        `/api/events/${eventId}/queue/stream?sessionId=${sessionId}`,
+        { Cookie: cookie },
+      );
 
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.data).toHaveProperty("status");
+      expect(status).toBe(200);
+      expect(event).toBe("snapshot");
+      expect(data).toHaveProperty("status");
     });
 
     it("[2-2] 존재하지 않는 sessionId(유효 형식) → 404", async () => {
       // 세션 후속 API 는 authMiddleware 로 인증 강제. 인증된 유저가 존재하지 않는
       // sessionId 를 조회하면 서비스 레이어에서 SESSION_NOT_FOUND(404) 반환.
+      const { eventId } = await createOpenEvent(admin.userId);
+      createdEventIds.push(eventId);
+
       const user  = await createTestUser();
-      const agent = await loginAgent(user.email, user.password);
+      const agent = request.agent(app);
+      const loginRes = await agent
+        .post("/api/auth/login")
+        .set("Content-Type", "application/json")
+        .send({ email: user.email, password: user.password });
+      const cookie = toCookieHeader(loginRes.headers["set-cookie"]);
 
       // sessionId 형식 = 20자 소문자 hex
-      const res = await agent
-        .get("/api/events/sessions/deadbeefdeadbeefdeaf/queue");
+      const { status } = await readSseEvent(
+        app,
+        `/api/events/${eventId}/queue/stream?sessionId=deadbeefdeadbeefdeaf`,
+        { Cookie: cookie },
+      );
 
-      expect(res.status).toBe(404);
+      expect(status).toBe(404);
     });
   });
 
   // ─── [3] GET /api/events/sessions/:sessionId/seats ───────────────────────────
 
-  describe("[3] GET /api/events/sessions/:sessionId/seats — 좌석 목록 조회", () => {
-    it("[3-1] active 세션 좌석 목록 → 200, seats 배열 반환 (hold 후)", async () => {
+  describe("[3] GET /api/events/:eventId/seats/stream — 좌석 SSE 스트림", () => {
+    it("[3-1] active 세션 snapshot 이벤트 → seats 배열 반환 (hold 후)", async () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
       const user  = await createTestUser();
       await registerAndEnter(eventId, user.userId);
 
-      const agent = await loginAgent(user.email, user.password);
+      const agent = request.agent(app);
+      const loginRes = await agent
+        .post("/api/auth/login")
+        .set("Content-Type", "application/json")
+        .send({ email: user.email, password: user.password });
+      const cookie = toCookieHeader(loginRes.headers["set-cookie"]);
+
       const createRes = await agent
         .post(`/api/events/${eventId}/sessions`)
         .set("Content-Type", "application/json");
@@ -245,23 +274,35 @@ describe("Events Session API (ticketing flow)", () => {
         .set("Content-Type", "application/json")
         .send({ seatLabel: "FC-1-1" });
 
-      const res = await agent.get(`/api/events/sessions/${sessionId}/seats`);
+      const { status: sseStatus, event, data } = await readSseEvent(
+        app,
+        `/api/events/${eventId}/seats/stream?sessionId=${sessionId}`,
+        { Cookie: cookie },
+      );
 
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.body.data.seats)).toBe(true);
-      expect(res.body.data.seats.length).toBeGreaterThan(0);
-      expect(res.body.data.seats[0]).toHaveProperty("seatLabel");
-      expect(res.body.data.seats[0]).toHaveProperty("status");
+      expect(sseStatus).toBe(200);
+      expect(event).toBe("snapshot");
+      const seatsData = data as { seats: Array<{ seatLabel: string; status: string }> };
+      expect(Array.isArray(seatsData.seats)).toBe(true);
+      expect(seatsData.seats.length).toBeGreaterThan(0);
+      expect(seatsData.seats[0]).toHaveProperty("seatLabel");
+      expect(seatsData.seats[0]).toHaveProperty("status");
     });
 
-    it("[3-2] hold 후 seats 조회 시 3-segment 라벨이 반환된다", async () => {
+    it("[3-2] hold 후 snapshot 조회 시 3-segment 라벨이 반환된다", async () => {
       const { eventId } = await createOpenEvent(admin.userId);
       createdEventIds.push(eventId);
 
       const user  = await createTestUser();
       await registerAndEnter(eventId, user.userId);
 
-      const agent = await loginAgent(user.email, user.password);
+      const agent = request.agent(app);
+      const loginRes = await agent
+        .post("/api/auth/login")
+        .set("Content-Type", "application/json")
+        .send({ email: user.email, password: user.password });
+      const cookie = toCookieHeader(loginRes.headers["set-cookie"]);
+
       const createRes = await agent
         .post(`/api/events/${eventId}/sessions`)
         .set("Content-Type", "application/json");
@@ -269,18 +310,23 @@ describe("Events Session API (ticketing flow)", () => {
       const { sessionId, status } = createRes.body.data;
       if (status !== "active") return;
 
-      // hold → live_seats에 upsert된 뒤 seats 조회
+      // hold → live_seats에 upsert된 뒤 snapshot 조회
       const testLabel = "FC-1-1";
       await agent
         .post(`/api/events/sessions/${sessionId}/hold`)
         .set("Content-Type", "application/json")
         .send({ seatLabel: testLabel });
 
-      const res = await agent.get(`/api/events/sessions/${sessionId}/seats`);
-      expect(res.status).toBe(200);
+      const { status: sseStatus, event, data } = await readSseEvent(
+        app,
+        `/api/events/${eventId}/seats/stream?sessionId=${sessionId}`,
+        { Cookie: cookie },
+      );
+      expect(sseStatus).toBe(200);
+      expect(event).toBe("snapshot");
 
-      const labels = (res.body.data.seats as Array<{ seatLabel: string }>)
-        .map((s) => s.seatLabel);
+      const seatsData = data as { seats: Array<{ seatLabel: string }> };
+      const labels = seatsData.seats.map((s) => s.seatLabel);
 
       expect(labels.length).toBeGreaterThan(0);
       // 3-segment 형식 검증

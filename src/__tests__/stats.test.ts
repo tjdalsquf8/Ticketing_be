@@ -64,3 +64,7 @@ describe("Stats API", () => {
     expect(second.body.data).toEqual(first.body.data);
   });
 });
+
+afterAll(async () => {
+  await pool.end();
+});

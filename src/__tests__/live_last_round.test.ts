@@ -24,6 +24,7 @@ const createdRoundIds: number[] = [];
 
 afterAll(async () => {
   await cleanupTestRounds(createdRoundIds);
+  await pool.end();
 });
 
 // ─── 테스트 스위트 ─────────────────────────────────────────────────────────────

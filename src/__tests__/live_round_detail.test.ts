@@ -9,6 +9,7 @@
 
 import request from "supertest";
 import app from "../app";
+import pool from "../config/db";
 import {
   createTestRound,
   cleanupTestRounds,
@@ -26,6 +27,7 @@ const createdRoundIds: number[] = [];
 afterAll(async () => {
   await cleanupTestRounds(createdRoundIds);
   await cleanupTestLiveUsers();
+  await pool.end();
 });
 
 async function loginAgent(email: string, password: string) {

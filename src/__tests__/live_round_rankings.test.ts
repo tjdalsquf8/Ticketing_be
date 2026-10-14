@@ -12,6 +12,7 @@
 import request from "supertest";
 import crypto from "crypto";
 import app from "../app";
+import pool from "../config/db";
 import {
   createTestRound,
   cleanupTestRounds,
@@ -24,6 +25,7 @@ const createdRoundIds: number[] = [];
 afterAll(async () => {
   await cleanupTestRounds(createdRoundIds);
   await cleanupTestLiveUsers();
+  await pool.end();
 });
 
 /** 게스트 세션 하나를 완주 상태로 심는다 */

@@ -27,3 +27,7 @@ describe("Test Setup Smoke Test", () => {
     await expect(cleanupTestPracticeSessions()).resolves.not.toThrow();
   });
 });
+
+afterAll(async () => {
+  await pool.end();
+});
