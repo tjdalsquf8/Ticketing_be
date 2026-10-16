@@ -3,6 +3,7 @@ import * as liveController from "../controllers/live.controller";
 import * as participateController from "../controllers/live_participate.controller";
 import { liveLimiter } from "../middlewares/rateLimiter";
 import optionalAuthMiddleware from "../middlewares/optionalAuthMiddleware";
+import requireRedis from "../middlewares/requireRedis";
 import {
   roundIdParamValidator,
   getRoundRankingsQueryValidator,
@@ -35,6 +36,9 @@ router.get(
 );
 
 // ─── 참여 API 라우트 ──────────────────────────────────────────────────────────
+// 참여 라우트는 Redis 상태에 의존하므로 연결이 끊기면 503으로 즉시 거절한다.
+router.use(requireRedis);
+
 router.post(
   "/rounds/:roundId/sessions",
   roundIdParamValidator,
